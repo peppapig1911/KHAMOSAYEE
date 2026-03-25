@@ -39,13 +39,9 @@ project(khamosayee C CXX ASM)
 
 pico_sdk_init()
 
-add_executable(khamosayee
-    ${CMAKE_CURRENT_LIST_DIR}/main.c
-    ${CMAKE_CURRENT_LIST_DIR}/cmps12.c
-    ${CMAKE_CURRENT_LIST_DIR}/servo_direction.c
-    ${CMAKE_CURRENT_LIST_DIR}/servo_voile.c
-    ${CMAKE_CURRENT_LIST_DIR}/pid.c
-)
+file(GLOB SOURCES ${CMAKE_CURRENT_LIST_DIR}/src/*.c ${CMAKE_CURRENT_LIST_DIR}/src/*.cpp)
+
+add_executable(khamosayee ${SOURCES})
 
 pico_set_program_name(khamosayee "khamosayee")
 pico_set_program_version(khamosayee "0.1")
@@ -54,13 +50,20 @@ pico_enable_stdio_uart(khamosayee 0)
 pico_enable_stdio_usb(khamosayee 1)
 
 target_include_directories(khamosayee PRIVATE
-    ${CMAKE_CURRENT_LIST_DIR}
+    ${CMAKE_CURRENT_LIST_DIR}/include
 )
 
 target_link_libraries(khamosayee
     pico_stdlib
     hardware_i2c
     hardware_pwm
+    pico_cyw43_arch_lwip_threadsafe_background
+    pico_btstack_ble
+    pico_btstack_cyw43
 )
 
 pico_add_extra_outputs(khamosayee)
+
+#pico_btstack_make_gatt_header(khamosayee PRIVATE
+#    ${CMAKE_CURRENT_LIST_DIR}/src/calypso_anemometer.gatt
+#)

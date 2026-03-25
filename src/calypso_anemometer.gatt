@@ -1,0 +1,6 @@
+// calypso_anemometer.gatt
+// This file defines the GATT client profile for connecting to the Calypso Anemometer
+// The actual service discovery is done programmatically since we are a GATT *client*
+
+PRIMARY_SERVICE, GAP_SERVICE
+CHARACTERISTIC, GAP_DEVICE_NAME, READ, "PicoW_Calypso"
