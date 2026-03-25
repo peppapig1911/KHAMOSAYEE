@@ -1,4 +1,5 @@
-extern "C" {
+extern "C"
+{
 #include "pico/stdlib.h"
 #include "pico/cyw43_arch.h"
 #include "btstack.h"
@@ -108,8 +109,10 @@ static void handle_voile_command()
     else
         return;
 
-    if (voile_angle > 180.0f) voile_angle = 180.0f;
-    if (voile_angle < 0.0f)   voile_angle = 0.0f;
+    if (voile_angle > 180.0f)
+        voile_angle = 180.0f;
+    if (voile_angle < 0.0f)
+        voile_angle = 0.0f;
 
     servo_voile_set_angle(voile_angle);
     printf(">>> Voile : %.1f deg\n", voile_angle);
