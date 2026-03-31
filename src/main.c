@@ -2,17 +2,16 @@
 #include "task.h"
 #include <stdio.h>
 #include "pico/stdlib.h"
+#include "pico/cyw43_arch.h"
 
 
 void led_task()
-{   
-    const uint LED_PIN = PICO_DEFAULT_LED_PIN;
-    gpio_init(LED_PIN);
-    gpio_set_dir(LED_PIN, GPIO_OUT);
+{
+    cyw43_arch_init();
     while (true) {
-        gpio_put(LED_PIN, 1);
+        cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 1);
         vTaskDelay(100);
-        gpio_put(LED_PIN, 0);
+        cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 0);
         vTaskDelay(100);
     }
 }
