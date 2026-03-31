@@ -1,0 +1,7 @@
+{
+    "cmake.environment": {
+        "PICO_SDK_PATH": "/home/dmin/pico-sdk",
+        "PICO_BOARD": "pico_w"
+    },
+    "cmake.parallelJobs": 0
+}
