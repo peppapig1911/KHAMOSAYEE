@@ -19,6 +19,8 @@ void led_task()
 int main()
 {
     stdio_init_all();
+    while (!stdio_usb_connected()) tight_loop_contents();
+    printf("Hello from RP2040!\n");
 
     xTaskCreate(led_task, "LED_Task", 256, NULL, 1, NULL);
     vTaskStartScheduler();
