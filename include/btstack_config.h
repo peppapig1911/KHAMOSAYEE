@@ -1,5 +1,6 @@
 #ifndef BTSTACK_CONFIG_H
 #define BTSTACK_CONFIG_H
+#endif
 
 // Memory
 #define HAVE_MALLOC

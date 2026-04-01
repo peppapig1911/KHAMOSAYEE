@@ -65,5 +65,5 @@ target_link_libraries(khamosayee
 pico_add_extra_outputs(khamosayee)
 
 pico_btstack_make_gatt_header(khamosayee PRIVATE
-    ${CMAKE_CURRENT_LIST_DIR}/src/ble.gatt
+    ${CMAKE_CURRENT_LIST_DIR}/include/ble.gatt
 )

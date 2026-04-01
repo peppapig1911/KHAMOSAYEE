@@ -21,7 +21,7 @@ const int steering_sign = 1;
 
 CalypsoAnemometer calypso;
 BleServer ble_server;
-ServoMotor front_wheel(6);
+ServoMotor front_wheel(6, 40, 160);
 ServoMotor sail(7, 0, 250);
 CMPS12 cmps12(i2c1);
 
@@ -121,15 +121,6 @@ int main()
     sail.init();
     front_wheel.init();
 
-    printf("All Initiated!");
-
-    while (true)
-    {
-        int v = read_int();
-        printf("Received %d", v);
-        front_wheel.rotate_deg(v);
-    }
-
     if (cyw43_arch_init())
     {
         printf("CYW43 init failed!\n");
@@ -150,7 +141,14 @@ int main()
     sleep_ms(1000);
     calypso.connect();
 
+    printf("All Initiated!");
+
+    // while (1)
+    // {
+    //     int v = read_int();
+    //     printf("Sending: %f\n", v / 100.0f);
+    //     front_wheel.rotate(v / 100.0f);
+    // }
+
     return 0;
 }
-
-// Gauche max: 130
