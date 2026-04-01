@@ -39,7 +39,7 @@ project(khamosayee C CXX ASM)
 
 pico_sdk_init()
 
-file(GLOB SOURCES ${CMAKE_CURRENT_LIST_DIR}/src/*.c ${CMAKE_CURRENT_LIST_DIR}/src/*.cpp)
+file(GLOB SOURCES ${CMAKE_CURRENT_LIST_DIR}/src/*.c ${CMAKE_CURRENT_LIST_DIR}/src/**/*.c ${CMAKE_CURRENT_LIST_DIR}/src/*.cpp ${CMAKE_CURRENT_LIST_DIR}/src/**/*.cpp)
 
 add_executable(khamosayee ${SOURCES})
 
@@ -64,6 +64,6 @@ target_link_libraries(khamosayee
 
 pico_add_extra_outputs(khamosayee)
 
-#pico_btstack_make_gatt_header(khamosayee PRIVATE
-#    ${CMAKE_CURRENT_LIST_DIR}/src/calypso_anemometer.gatt
-#)
+pico_btstack_make_gatt_header(khamosayee PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src/ble.gatt
+)

@@ -9,7 +9,7 @@
  *        -> DISCOVERING_CHARACTERISTICS -> ENABLING_NOTIFICATIONS -> SUBSCRIBED
  */
 
-#include "calypso_anemometer.h"
+#include "sensors/calypso_anemometer.h"
 
 #include <stdio.h>
 #include <string.h>

@@ -1,0 +1,26 @@
+// wind_service.gatt
+// BLE GATT definitions for restreaming Calypso anemometer data
+// Uses standard Bluetooth SIG UUIDs
+
+// === GAP Service ===
+PRIMARY_SERVICE, GAP_SERVICE
+CHARACTERISTIC, GAP_DEVICE_NAME, READ, "KHAMOSAYEE"
+
+// === GATT Service ===
+PRIMARY_SERVICE, GATT_SERVICE
+
+// === Environmental Sensing Service (0x181A) ===
+PRIMARY_SERVICE, 0x181A
+
+// Apparent Wind Speed (0x2A72) — uint16, 0.01 m/s resolution
+// READ: poll current value | NOTIFY: push on update
+CHARACTERISTIC, 0x2A72, READ | NOTIFY | DYNAMIC,
+
+// Apparent Wind Direction (0x2A73) — uint16, 0.01 degrees resolution
+CHARACTERISTIC, 0x2A73, READ | NOTIFY | DYNAMIC,
+
+// === Battery Service (0x180F) ===
+PRIMARY_SERVICE, 0x180F
+
+// Battery Level (0x2A19) — uint8, 0-100%
+CHARACTERISTIC, 0x2A19, READ | NOTIFY | DYNAMIC,
