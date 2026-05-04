@@ -14,7 +14,6 @@ extern "C"
 
 #define DT 0.15f
 #define DEADBAND 2.0f
-#define SERVO_CENTER_OFFSET 133.0f
 
 PID pid_cap(0.3f, 0.0f, 0.05f, 30.0f);
 const int steering_sign = 1;
@@ -32,11 +31,35 @@ static float heading_error_to_north(float heading_deg)
     return heading_deg;
 }
 
-static void system_init()
+static float sail_angle_from_wind(float wind_direction_deg)
 {
-    printf("=== Char a Voile - North hold + Voile ===\n");
-    printf("Servo direction offset: %.1f deg\n", SERVO_CENTER_OFFSET);
-    printf("Commandes voile : 'o'=ouverte 'm'=mi-ouverte 'f'=fermee '+/-'=+/-5deg\n");
+    float wind = wind_direction_deg;
+
+    while (wind < 0.0f)
+        wind += 360.0f;
+    while (wind >= 360.0f)
+        wind -= 360.0f;
+
+    // Keep only the incidence magnitude: 0..180 deg.
+    float beta = wind;
+    if (beta > 180.0f)
+        beta = 360.0f - beta;
+
+    // Aerodynamic law then clamped physical range.
+    float delta = beta - 15.0f;
+    if (delta < 0.0f)
+        delta = 0.0f;
+    if (delta > 90.0f)
+        delta = 90.0f;
+
+    // Servo command: 180 (open) -> 0 (closed).
+    return 180.0f - (delta * 2.0f);
+}
+
+static void control_sail_from_wind(float wind_direction_deg)
+{
+    float target_angle = sail_angle_from_wind(wind_direction_deg);
+    sail.rotate_deg(target_angle);
 }
 
 static void print_calib()
@@ -62,11 +85,11 @@ static void steer_to_north()
     {
         front_wheel.reset();
         pid_cap.reset();
-        printf("Cap:%.1f Pitch:%d Roll:%d | Err:%.1f | DEADBAND | Servo:%.1f", nav.cap, nav.pitch, nav.roll, err, SERVO_CENTER_OFFSET);
+        printf("Cap:%.1f Pitch:%d Roll:%d | Err:%.1f | DEADBAND | Servo:%.1f", nav.cap, nav.pitch, nav.roll, err);
     }
 
     float correction = steering_sign * pid_cap.compute(err, DT);
-    float angle = SERVO_CENTER_OFFSET + correction;
+    float angle =correction;
     front_wheel.rotate(angle);
     printf("Cap:%.1f Pitch:%d Roll:%d | Err:%+.1f | Corr:%+.1f | Servo:%.1f", nav.cap, nav.pitch, nav.roll, err, correction, angle);
 
@@ -75,6 +98,7 @@ static void steer_to_north()
 
 static void on_wind_data(const CalypsoData *data)
 {
+    control_sail_from_wind(data->wind_direction);
     ble_server.update(data);
 }
 
