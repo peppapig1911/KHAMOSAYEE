@@ -3,20 +3,15 @@ extern "C"
 #include "pico/stdlib.h"
 #include "pico/cyw43_arch.h"
 #include "btstack.h"
-#include "pid.h"
 }
 
 #include "actuators/servo_motor.h"
 #include "sensors/calypso_anemometer.h"
 #include "sensors/cmps12.h"
-
 #include "ble_server.h"
-
-#define DT 0.15f
-#define DEADBAND 2.0f
-
-PID pid_cap(0.3f, 0.0f, 0.05f, 30.0f);
-const int steering_sign = 1;
+#include "navigation.h" 
+#include <cmath>
+#include <cstring>
 
 CalypsoAnemometer calypso;
 BleServer ble_server;
@@ -24,12 +19,9 @@ ServoMotor front_wheel(6, 40, 160);
 ServoMotor sail(7, 0, 250);
 CMPS12 cmps12(i2c1);
 
-static float heading_error_to_north(float heading_deg)
-{
-    if (heading_deg > 180.0f)
-        heading_deg -= 360.0f;
-    return heading_deg;
-}
+static constexpr float FRONT_WHEEL_CENTER_DEG = 60.0f;
+
+volatile float last_known_wind = 0.0f; 
 
 static float sail_angle_from_wind(float wind_direction_deg)
 {
@@ -52,7 +44,7 @@ static float sail_angle_from_wind(float wind_direction_deg)
     if (delta > 90.0f)
         delta = 90.0f;
 
-    // Servo command: 180 (open) -> 0 (closed).
+// Servo command: 180 (open) -> 0 (closed).
     return 180.0f - (delta * 2.0f);
 }
 
@@ -68,39 +60,43 @@ static void print_calib()
     printf(" | Calib M:%d A:%d G:%d S:%d\n", calib.mag, calib.acc, calib.gyro, calib.sys);
 }
 
-static void steer_to_north()
-{
-    auto nav = cmps12.navigation();
-    // TODO: Handle read fail
-    // {
-    //     front_wheel.reset();
-    //     pid_cap.reset();
-    //     printf("Compass read failed, steering center\n");
-    //     return;
-    // }
-
-    float err = heading_error_to_north(nav.cap);
-
-    if (err > -DEADBAND && err < DEADBAND)
-    {
-        front_wheel.reset();
-        pid_cap.reset();
-        printf("Cap:%.1f Pitch:%d Roll:%d | Err:%.1f | DEADBAND | Servo:%.1f", nav.cap, nav.pitch, nav.roll, err);
-    }
-
-    float correction = steering_sign * pid_cap.compute(err, DT);
-    float angle =correction;
-    front_wheel.rotate(angle);
-    printf("Cap:%.1f Pitch:%d Roll:%d | Err:%+.1f | Corr:%+.1f | Servo:%.1f", nav.cap, nav.pitch, nav.roll, err, correction, angle);
-
-    print_calib();
-}
-
 static void on_wind_data(const CalypsoData *data)
 {
+    last_known_wind = data->wind_direction;
     control_sail_from_wind(data->wind_direction);
     ble_server.update(data);
 }
+
+
+
+static float cap_vers_point(float dx, float dy)
+{
+    // Calculate angle
+    float angle_rad = atan2f(dx, dy);  // dx=East, dy=North
+    float cap = angle_rad * 180.0f / M_PI;
+
+    // Normalisation 0..360
+    if (cap < 0.0f) cap += 360.0f;
+
+    return cap;
+}
+
+static bool parse_manual_angle_command(const char *input, float &angle_deg)
+{
+    float requested_angle = 0.0f;
+
+    if (sscanf(input, "a %f", &requested_angle) != 1)
+        return false;
+
+    if (requested_angle < 0.0f)
+        requested_angle = 0.0f;
+    if (requested_angle > 180.0f)
+        requested_angle = 180.0f;
+
+    angle_deg = requested_angle;
+    return true;
+}
+
 
 int read_int()
 {
@@ -144,6 +140,7 @@ int main()
 
     sail.init();
     front_wheel.init();
+    navigation_init(); 
 
     if (cyw43_arch_init())
     {
@@ -165,14 +162,162 @@ int main()
     sleep_ms(1000);
     calypso.connect();
 
-    printf("All Initiated!");
+    printf("All Initiated!\n");
 
-    // while (1)
-    // {
-    //     int v = read_int();
-    //     printf("Sending: %f\n", v / 100.0f);
-    //     front_wheel.rotate(v / 100.0f);
-    // }
+    enum class SystemPhase
+    {
+        CALIBRATION,
+        SERVO_ZERO,
+        WAIT_TARGET,
+        NAVIGATION
+    };
+
+    SystemPhase phase = SystemPhase::CALIBRATION;
+
+    // Definition des coordonnees de la cible
+    float target_x = 0.0f;
+    float target_y = 0.0f;
+    float x_actuel = 0.0f;
+    float y_actuel = 0.0f;
+
+    static char input_buf[64];
+    static int input_idx = 0;
+    bool target_prompt_printed = false;
+
+    absolute_time_t last_calib_print = get_absolute_time();
+
+    printf("[PHASE 1] Calibration CMPS12 en cours.\n");
+    printf("Tourner le capteur sur plusieurs axes jusqu'a obtenir SYS=3.\n");
+    printf("Vous pouvez aussi taper 'start' pour forcer la suite.\n");
+
+    while (1)
+    {
+        // Lecture non-bloquante : drain tous les octets disponibles
+        int c;
+
+        while ((c = getchar_timeout_us(0)) != PICO_ERROR_TIMEOUT)
+        {
+            if (c == '\r')
+                continue;
+
+            if (c == '\n')
+            {
+                input_buf[input_idx] = '\0';
+
+                float manual_angle = 0.0f;
+                if (parse_manual_angle_command(input_buf, manual_angle))
+                {
+                    front_wheel.rotate_deg(manual_angle);
+                    printf("Angle servo applique : %.1f deg\n", manual_angle);
+                    target_prompt_printed = false;
+                }
+                else if (phase == SystemPhase::CALIBRATION)
+                {
+                    if (strcmp(input_buf, "start") == 0)
+                    {
+                        printf("Calibration forcee par l'utilisateur.\n");
+                        phase = SystemPhase::SERVO_ZERO;
+                    }
+                }
+                else if (phase == SystemPhase::WAIT_TARGET)
+                {
+                    float new_x, new_y;
+                    if (sscanf(input_buf, "%f %f", &new_x, &new_y) == 2)
+                    {
+                        target_x = new_x;
+                        target_y = new_y;
+                        printf("Nouvelle cible validee : (%.2f, %.2f)\n", target_x, target_y);
+                        phase = SystemPhase::NAVIGATION;
+                        target_prompt_printed = false;
+                    }
+                    else if (input_buf[0] != '\0')
+                    {
+                        printf("Format invalide. Entrez: x y\n");
+                        target_prompt_printed = false;
+                    }
+                }
+
+                input_idx = 0;
+            }
+            else if (input_idx < (int)sizeof(input_buf) - 1)
+            {
+                input_buf[input_idx++] = (char)c;
+            }
+        }
+
+        if (phase == SystemPhase::CALIBRATION)
+        {
+            if (absolute_time_diff_us(last_calib_print, get_absolute_time()) >= 1000000)
+            {
+                auto calib = cmps12.calibration();
+                printf("Calib -> M:%d A:%d G:%d S:%d\n", calib.mag, calib.acc, calib.gyro, calib.sys);
+                last_calib_print = get_absolute_time();
+
+                if (calib.sys == 3)
+                {
+                    printf("[PHASE 1] Calibration terminee.\n");
+                    phase = SystemPhase::SERVO_ZERO;
+                }
+            }
+
+            sleep_ms(20);
+            continue;
+        }
+
+        if (phase == SystemPhase::SERVO_ZERO)
+        {
+            // Position neutre de direction (a calibrer selon la mecanique).
+            front_wheel.rotate_deg(FRONT_WHEEL_CENTER_DEG);
+            navigation_init();
+            printf("[PHASE 2] Servo direction positionne au neutre (%.1f deg).\n", FRONT_WHEEL_CENTER_DEG);
+            printf("[PHASE 3] Entrez la cible: x y (ou angle manuel: a <deg>)\n");
+            phase = SystemPhase::WAIT_TARGET;
+            target_prompt_printed = false;
+            sleep_ms(20);
+            continue;
+        }
+
+        if (phase == SystemPhase::WAIT_TARGET)
+        {
+            if (!target_prompt_printed)
+            {
+                printf("Entrer nouvelle cible x y ou a <deg> : ");
+                target_prompt_printed = true;
+            }
+
+            sleep_ms(20);
+            continue;
+        }
+
+        // phase == NAVIGATION
+        x_actuel += 1.0f;
+        y_actuel += 1.0f;
+
+        float dx = target_x - x_actuel;
+        float dy = target_y - y_actuel;
+        float cap_cible_gps = cap_vers_point(dx, dy);
+
+        float wind_gap = calculate_heading_error(last_known_wind, cap_cible_gps);
+        float cap_to_follow = cap_cible_gps;
+
+        // Zone morte : si la cible est a moins de 45 deg du vent
+        if (fabsf(wind_gap) < 45.0f)
+        {
+            if (wind_gap >= 0.0f)
+                cap_to_follow = last_known_wind + 45.0f; // tribord
+            else
+                cap_to_follow = last_known_wind - 45.0f; // babord
+        }
+
+        // Normalise cap_to_follow entre 0 et 360
+        if (cap_to_follow < 0.0f)
+            cap_to_follow += 360.0f;
+        if (cap_to_follow >= 360.0f)
+            cap_to_follow -= 360.0f;
+
+        steer_to_heading(cap_to_follow, cmps12, front_wheel);
+        sleep_ms(1000);
+    }
 
     return 0;
 }

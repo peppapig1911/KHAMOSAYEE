@@ -1,6 +1,7 @@
 #include "sensors/cmps12.h"
 
 #include "hardware/gpio.h"
+#include <cmath>
 
 RawData CMPS12::raw()
 {
@@ -19,10 +20,10 @@ RawData CMPS12::raw()
 
 NavData CMPS12::navigation()
 {
-    unsigned char buffer[4];
+    unsigned char buffer[4] = {};
     if (!read_register(0x02, buffer, 4))
     {
-        // TODO: Handle error
+        return NavData{ .cap = NAN, .pitch = 0, .roll = 0 };
     }
 
     return NavData{
