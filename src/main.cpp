@@ -21,7 +21,7 @@ const int steering_sign = 1;
 
 CalypsoAnemometer calypso;
 BleServer ble_server;
-ServoMotor front_wheel(6, 40, 160);
+ServoMotor front_wheel(6, 50, 160);
 ServoMotor sail(7, 0, 250);
 CMPS12 cmps12(i2c1);
 
@@ -143,12 +143,12 @@ int main()
 
     printf("All Initiated!");
 
-    // while (1)
-    // {
-    //     int v = read_int();
-    //     printf("Sending: %f\n", v / 100.0f);
-    //     front_wheel.rotate(v / 100.0f);
-    // }
+    while (1)
+    {
+        float v = read_int() / 100.0f; // Convert to degrees
+        printf("Sending: %.2f\n", v);
+        front_wheel.rotate(1 - v);
+    }
 
     return 0;
 }

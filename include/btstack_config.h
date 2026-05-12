@@ -41,4 +41,4 @@
 // BTstack memory pools (if not using malloc)
 #define MAX_NR_BTSTACK_LINK_KEY_DB_MEMORY_ENTRIES 0
 
-#endif // BTSTACK_CONFIG_H
+//#endif // BTSTACK_CONFIG_H
