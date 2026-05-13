@@ -24,7 +24,7 @@ const int steering_sign = 1;
 
 CalypsoAnemometer calypso;
 BleServer ble_server;
-ServoMotor front_wheel(6, 40, 160);
+ServoMotor front_wheel(6, 50, 160);
 ServoMotor sail(7, 0, 250);
 CMPS12 cmps12(i2c1);
 ZedF9P gps(i2c1);
