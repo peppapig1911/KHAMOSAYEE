@@ -2,12 +2,16 @@
 
 #include <cstdio>
 #include <cstring>
+#include <memory>
 
 #include "pico/stdlib.h"
 #include "hardware/uart.h"
 
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
+
+#include "FreeRTOS.h"
+#include "task.h"
 
 NtripClient::NtripClient(
     const char *host,
@@ -92,4 +96,14 @@ void NtripClient::run()
 
         _sink->onRtcmWrite(buffer, len);
     }
+}
+
+void NtripClient::task(void *param)
+{
+    auto *client =
+        static_cast<NtripClient *>(param);
+
+    client->run();
+
+    vTaskDelete(NULL);
 }
