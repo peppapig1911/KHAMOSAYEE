@@ -7,7 +7,7 @@
  *     └── Battery Level           0x2A19  READ | NOTIFY
  */
 
-#include "ble_server.h"
+#include "comms/ble_server.h"
 
 #include <cstdio>
 
