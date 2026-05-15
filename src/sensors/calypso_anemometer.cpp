@@ -16,6 +16,7 @@
 
 #include "pico/stdlib.h"
 #include "pico/cyw43_arch.h"
+#include "log.h"
 
 CalypsoAnemometer *CalypsoAnemometer::instance_ = nullptr;
 
@@ -51,23 +52,23 @@ void CalypsoAnemometer::init(const char *mac_address, uint8_t addr_type, DataCal
 
     gatt_client_init();
 
-    printf("[Calypso] Initialized. Target: %s (type: %s)\n",
-           mac_address,
-           addr_type == 1 ? "random" : "public");
+    LOGI("Calypso", "Initialized. Target: %s (type: %s)",
+         mac_address,
+         addr_type == 1 ? "random" : "public");
 }
 
 void CalypsoAnemometer::connect()
 {
     if (state_ == State::CONNECTING || state_ == State::SUBSCRIBED)
     {
-        printf("[Calypso] Already connecting or connected.\n");
+        LOGD("Calypso", "Already connecting or connected.");
         return;
     }
 
     state_ = State::CONNECTING;
-    printf("[Calypso] Connecting to %02X:%02X:%02X:%02X:%02X:%02X...\n",
-           target_addr_[0], target_addr_[1], target_addr_[2],
-           target_addr_[3], target_addr_[4], target_addr_[5]);
+    LOGI("Calypso", "Connecting to %02X:%02X:%02X:%02X:%02X:%02X...",
+         target_addr_[0], target_addr_[1], target_addr_[2],
+         target_addr_[3], target_addr_[4], target_addr_[5]);
 
     gap_connect(target_addr_, target_addr_type_);
 }
@@ -88,8 +89,6 @@ bool CalypsoAnemometer::isConnected() const
 {
     return state_ == State::SUBSCRIBED;
 }
-
-// --- Static trampolines ---
 
 void CalypsoAnemometer::hciEventHandlerS(uint8_t type, uint16_t channel, uint8_t *packet, uint16_t size)
 {
@@ -151,18 +150,18 @@ void CalypsoAnemometer::gattEventHandler(uint8_t packet_type, uint16_t channel, 
         {
         case GATT_EVENT_SERVICE_QUERY_RESULT:
             gatt_event_service_query_result_get_service(packet, &service_);
-            printf("[Calypso] Found service 0x%04X\n", SERVICE_UUID);
+            LOGD("Calypso", "Found service 0x%04X", SERVICE_UUID);
             break;
 
         case GATT_EVENT_QUERY_COMPLETE:
             att_status = gatt_event_query_complete_get_att_status(packet);
             if (att_status != ATT_ERROR_SUCCESS)
             {
-                printf("[Calypso] Service discovery failed: 0x%02X\n", att_status);
+                LOGE("Calypso", "Service discovery failed: 0x%02X", att_status);
                 disconnect();
                 return;
             }
-            printf("[Calypso] Discovering characteristics...\n");
+            LOGI("Calypso", "Discovering characteristics...");
             state_ = State::DISCOVERING_CHARACTERISTICS;
             gatt_client_discover_characteristics_for_service_by_uuid16(
                 gattEventHandlerS, connection_handle_, &service_, MEASUREMENT_UUID);
@@ -178,15 +177,15 @@ void CalypsoAnemometer::gattEventHandler(uint8_t packet_type, uint16_t channel, 
         {
         case GATT_EVENT_CHARACTERISTIC_QUERY_RESULT:
             gatt_event_characteristic_query_result_get_characteristic(packet, &measurement_char_);
-            printf("[Calypso] Found measurement characteristic 0x%04X (handle: 0x%04X)\n",
-                   MEASUREMENT_UUID, measurement_char_.value_handle);
+            LOGD("Calypso", "Found measurement characteristic 0x%04X (handle: 0x%04X)",
+                 MEASUREMENT_UUID, measurement_char_.value_handle);
             break;
 
         case GATT_EVENT_QUERY_COMPLETE:
             att_status = gatt_event_query_complete_get_att_status(packet);
             if (att_status != ATT_ERROR_SUCCESS)
             {
-                printf("[Calypso] Characteristic discovery failed: 0x%02X\n", att_status);
+                LOGE("Calypso", "Characteristic discovery failed: 0x%02X", att_status);
                 disconnect();
                 return;
             }
@@ -199,7 +198,7 @@ void CalypsoAnemometer::gattEventHandler(uint8_t packet_type, uint16_t channel, 
                 notification_registered_ = true;
             }
 
-            printf("[Calypso] Enabling notifications...\n");
+            LOGI("Calypso", "Enabling notifications...");
             state_ = State::ENABLING_NOTIFICATIONS;
             gatt_client_write_client_characteristic_configuration(
                 gattEventHandlerS, connection_handle_, &measurement_char_,
@@ -217,12 +216,12 @@ void CalypsoAnemometer::gattEventHandler(uint8_t packet_type, uint16_t channel, 
             att_status = gatt_event_query_complete_get_att_status(packet);
             if (att_status != ATT_ERROR_SUCCESS)
             {
-                printf("[Calypso] Enable notifications failed: 0x%02X\n", att_status);
+                LOGE("Calypso", "Enable notifications failed: 0x%02X", att_status);
                 disconnect();
                 return;
             }
             state_ = State::SUBSCRIBED;
-            printf("[Calypso] Subscribed to notifications. Receiving data.\n");
+            LOGI("Calypso", "Subscribed to notifications. Receiving data.");
         }
         break;
 
@@ -249,15 +248,15 @@ void CalypsoAnemometer::hciEventHandler(uint8_t packet_type, uint16_t channel, u
         uint8_t status = hci_subevent_le_connection_complete_get_status(packet);
         if (status != ERROR_CODE_SUCCESS)
         {
-            printf("[Calypso] Connection failed: 0x%02X\n", status);
+            LOGE("Calypso", "Connection failed: 0x%02X", status);
             state_ = State::DISCONNECTED;
             scheduleReconnect();
             return;
         }
         connection_handle_ = hci_subevent_le_connection_complete_get_connection_handle(packet);
-        printf("[Calypso] Connected! (handle: 0x%04X)\n", connection_handle_);
+        LOGI("Calypso", "Connected! (handle: 0x%04X)", connection_handle_);
 
-        printf("[Calypso] Discovering services...\n");
+        LOGI("Calypso", "Discovering services...");
         state_ = State::DISCOVERING_SERVICES;
         gatt_client_discover_primary_services_by_uuid16(
             gattEventHandlerS, connection_handle_, SERVICE_UUID);
@@ -267,7 +266,7 @@ void CalypsoAnemometer::hciEventHandler(uint8_t packet_type, uint16_t channel, u
     case HCI_EVENT_DISCONNECTION_COMPLETE:
         if (state_ == State::IDLE)
             break;
-        printf("[Calypso] Disconnected.\n");
+        LOGI("Calypso", "Disconnected.");
         notification_registered_ = false;
         state_ = State::DISCONNECTED;
         connection_handle_ = HCI_CON_HANDLE_INVALID;
@@ -276,7 +275,7 @@ void CalypsoAnemometer::hciEventHandler(uint8_t packet_type, uint16_t channel, u
 
     case BTSTACK_EVENT_STATE:
         if (btstack_event_state_get_state(packet) == HCI_STATE_WORKING)
-            printf("[Calypso] BTstack ready.\n");
+            LOGD("Calypso", "BTstack ready.");
         break;
 
     default:
@@ -286,7 +285,7 @@ void CalypsoAnemometer::hciEventHandler(uint8_t packet_type, uint16_t channel, u
 
 void CalypsoAnemometer::scheduleReconnect()
 {
-    printf("[Calypso] Will reconnect in %lu ms\n", RECONNECT_DELAY_MS);
+    LOGI("Calypso", "Will reconnect in %lu ms", RECONNECT_DELAY_MS);
     btstack_run_loop_set_timer(&reconnect_timer_, RECONNECT_DELAY_MS);
     btstack_run_loop_set_timer_handler(&reconnect_timer_, reconnectTimerHandlerS);
     btstack_run_loop_add_timer(&reconnect_timer_);

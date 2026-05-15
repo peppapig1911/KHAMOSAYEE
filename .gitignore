@@ -7,3 +7,4 @@ pico-sdk/
 
 
 .claude
+*.log

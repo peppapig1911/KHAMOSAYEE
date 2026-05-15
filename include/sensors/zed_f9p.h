@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "FreeRTOS.h"
+#include "semphr.h"
 #include "hardware/i2c.h"
 #include "comms/ntrip_client.h"
 
@@ -38,12 +40,13 @@ struct GNSSData
     bool valid;        // gnssFixOk flag from module
 };
 
-class ZedF9P : public IRtcmSink
+class ZedF9P : public IRtcmSink, public IGgaSource
 {
 public:
     static constexpr uint8_t DEFAULT_ADDR = 0x42;
 
-    ZedF9P(i2c_inst_t *i2c, uint8_t addr = DEFAULT_ADDR) : _i2c(i2c), _addr(addr) {}
+    ZedF9P(i2c_inst_t *i2c, uint8_t addr = DEFAULT_ADDR)
+        : _i2c(i2c), _addr(addr) {}
 
 public:
     // Returns true if the module ACKs on I2C (basic connectivity check)
@@ -97,6 +100,7 @@ private:
 private:
     i2c_inst_t *_i2c;
     uint8_t _addr;
+    SemaphoreHandle_t _i2c_mutex = nullptr;
     GNSSData _data{};
 
     // UBX parser state machine

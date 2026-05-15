@@ -10,10 +10,10 @@
 #define MEM_LIBC_MALLOC 0
 #define MEMP_MEM_MALLOC 0
 #define MEM_ALIGNMENT 4
-#define MEM_SIZE 4000
-#define MEMP_NUM_TCP_SEG 32
+#define MEM_SIZE (32 * 1024)
 #define MEMP_NUM_ARP_QUEUE 10
-#define PBUF_POOL_SIZE 24
+#define PBUF_POOL_SIZE 64
+#define MEMP_NUM_TCP_SEG 64
 
 #define LWIP_ARP 1
 #define LWIP_ETHERNET 1
@@ -39,14 +39,21 @@
 #define LWIP_HTTPD_SSI_INCLUDE_TAG 0
 
 #define LWIP_ALTCP 1
-#define LWIP_ALTCP_TLS 1
+#define LWIP_ALTCP_TLS 0
 
-#define LWIP_COMPAT_SOCKETS 1
-// #define LWIP_POSIX_SOCKETS_IO_NAMES 1
+#define LWIP_COMPAT_SOCKETS 0
+#define LWIP_POSIX_SOCKETS_IO_NAMES 0
 
 // Needed for DNS resolution (inet_aton, gethostbyname etc.)
 #define LWIP_DNS_API_DEFINE_TYPES 1
 
+// FreeRTOS tcpip thread settings used by cyw43_arch_init()
+#define TCPIP_MBOX_SIZE 8
+#define TCPIP_THREAD_STACKSIZE 4096
+
 #define LWIP_TIMEVAL_PRIVATE 0
+
+#define DEFAULT_UDP_RECVMBOX_SIZE 8
+#define DEFAULT_TCP_RECVMBOX_SIZE 8
 
 #endif
