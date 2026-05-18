@@ -84,6 +84,7 @@ static void steer_to_north()
 
 static void on_wind_data(const CalypsoData *data)
 {
+    LOGD(MODULE, "Wind speed: %.2f m/s | direction: %.1f deg | battery: %.2f V", data->wind_speed, data->wind_direction, data->battery);
     ble_server.update(data);
 }
 
@@ -143,14 +144,11 @@ static void wifi_init_task(void *param)
     }
     LOGI(MODULE, "WiFi connected successfully");
 
-    l2cap_init();
-    sm_init();
-    sm_set_io_capabilities(IO_CAPABILITY_NO_INPUT_NO_OUTPUT);
-
     ble_server.init();
 
     calypso.init("F9:26:B6:C0:42:F3", 1, on_wind_data);
     ble_server.startAdvertising();
+    calypso.connect();
 
     if (!gps.probe())
         LOGE(MODULE, "GPS not found on I2C (addr 0x%02X)!", ZedF9P::DEFAULT_ADDR);
@@ -181,17 +179,19 @@ static void wifi_init_task(void *param)
         tskIDLE_PRIORITY,
         NULL);
 
-    xTaskCreate(
-        print_position_task,
-        "posTask",
-        2048,
-        (void *)&gps,
-        tskIDLE_PRIORITY,
-        NULL);
+    // xTaskCreate(
+    //     print_position_task,
+    //     "posTask",
+    //     2048,
+    //     (void *)&gps,
+    //     tskIDLE_PRIORITY,
+    //     NULL);
 
     while (true)
     {
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        const auto calypso_data = calypso.getData(); // just to trigger callbacks and BLE updates
+        LOGD(MODULE, "Wind speed: %.2f m/s | direction: %.1f deg | battery: %.2f V", calypso_data.wind_speed, calypso_data.wind_direction, calypso_data.battery);
+        vTaskDelay(pdMS_TO_TICKS(5000));
     }
 
     vTaskDelete(NULL);
