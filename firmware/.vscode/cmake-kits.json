@@ -1,0 +1,13 @@
+[
+   {
+      "name": "Pico",
+      "compilers": {
+         "C": "/usr/bin/arm-none-eabi-gcc",
+         "CXX": "/usr/bin/arm-none-eabi-g++"
+      },
+      "environmentVariables": {
+         "PICO_SDK_PATH": "/home/dmin/.pico-sdk/sdk/2.2.0",
+         "PICO_TOOLCHAIN_PATH": "/usr"
+      }
+   }
+]
