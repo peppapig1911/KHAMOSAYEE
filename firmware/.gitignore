@@ -8,3 +8,8 @@ pico-sdk/
 
 .claude
 *.log
+
+.vscode/c_cpp_properties.json
+.vscode/cmake-kits.json
+.vscode/settings.json
+.vscode/tasks.json
