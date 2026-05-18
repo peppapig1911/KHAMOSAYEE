@@ -2,14 +2,12 @@
    {
       "name": "Pico",
       "compilers": {
-         "C": "${command:raspberry-pi-pico.getCompilerPath}",
-         "CXX": "${command:raspberry-pi-pico.getCxxCompilerPath}"
+         "C": "/usr/bin/arm-none-eabi-gcc",
+         "CXX": "/usr/bin/arm-none-eabi-g++"
       },
       "environmentVariables": {
-         "PATH": "${command:raspberry-pi-pico.getEnvPath};${env:PATH}"
-      },
-      "cmakeSettings": {
-         "Python3_EXECUTABLE": "${command:raspberry-pi-pico.getPythonPath}"
+         "PICO_SDK_PATH": "/home/dmin/.pico-sdk/sdk/2.2.0",
+         "PICO_TOOLCHAIN_PATH": "/usr"
       }
    }
 ]

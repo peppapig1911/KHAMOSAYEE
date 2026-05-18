@@ -6,6 +6,8 @@
 
 #include "pid.h"
 
+#include "sensors/odometry.h"
+
 #include "actuators/servo_motor.h"
 #include "sensors/calypso_anemometer.h"
 #include "sensors/cmps12.h"
@@ -194,33 +196,6 @@ static void wifi_init_task(void *param)
     vTaskDelete(NULL);
 }
 
-int read_int()
-{
-    const uint BUFFER_SIZE = 32;
-    char buffer[BUFFER_SIZE];
-    int index = 0;
-
-    while (true)
-    {
-        int c = getchar_timeout_us(0); // non-blocking
-
-        if (c != PICO_ERROR_TIMEOUT)
-        {
-            if (c == '\n' || c == '\r')
-            {
-                buffer[index] = '\0'; // end string
-
-                int value = atoi(buffer); // convert to int
-                return value;
-            }
-            else if (index < BUFFER_SIZE - 1)
-            {
-                buffer[index++] = (char)c;
-            }
-        }
-    }
-}
-
 int main()
 {
     stdio_init_all();
@@ -231,6 +206,19 @@ int main()
     }
 
     LOGI(MODULE, "USB connected, starting system...");
+
+    BaseType_t xReturned;
+
+    xReturned = xTaskCreate(odometry_task, "Odom_Task", 512, NULL, 2, NULL);
+
+    if (xReturned == pdPASS)
+    {
+        LOGI(MODULE, "Odometry started");
+    }
+    else
+    {
+        LOGI(MODULE, "Odometry launch failed");
+    }
 
     gpio_set_function(26, GPIO_FUNC_I2C);
     gpio_set_function(27, GPIO_FUNC_I2C);
