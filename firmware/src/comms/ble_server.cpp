@@ -16,6 +16,8 @@
 #include "btstack.h"
 #include "ble.h"
 
+#include "log.h"
+
 // ---------------------------------------------------------------------------
 // Advertising data
 // ---------------------------------------------------------------------------
@@ -64,6 +66,8 @@ static btstack_packet_callback_registration_t hci_event_cb_reg;
 
 // Pointer back to the owning instance so C callbacks can call startAdvertising()
 static BleServer *s_instance = nullptr;
+
+static constexpr const char *MODULE = "BLE Server";
 
 // ---------------------------------------------------------------------------
 // ATT read callback
@@ -132,7 +136,7 @@ static void hci_event_handler(uint8_t packet_type, uint16_t channel,
         {
             bd_addr_t local_addr;
             gap_local_bd_addr(local_addr);
-            printf("[BLE Server] Stack ready. MAC: %s\n", bd_addr_to_str(local_addr));
+            LOGI(MODULE, "Stack ready. MAC: %s", bd_addr_to_str(local_addr));
             if (s_instance)
                 s_instance->startAdvertising();
         }
@@ -142,12 +146,12 @@ static void hci_event_handler(uint8_t packet_type, uint16_t channel,
         if (hci_event_le_meta_get_subevent_code(packet) == HCI_SUBEVENT_LE_CONNECTION_COMPLETE)
         {
             con_handle = hci_subevent_le_connection_complete_get_connection_handle(packet);
-            printf("[BLE Server] Client connected (handle 0x%04X).\n", con_handle);
+            LOGI(MODULE, "Client connected (handle 0x%04X).", con_handle);
         }
         break;
 
     case HCI_EVENT_DISCONNECTION_COMPLETE:
-        printf("[BLE Server] Client disconnected. Re-advertising.\n");
+        LOGI(MODULE, "Client disconnected. Re-advertising.");
         con_handle = HCI_CON_HANDLE_INVALID;
         if (s_instance)
             s_instance->startAdvertising();
@@ -174,10 +178,12 @@ void BleServer::init()
     hci_event_cb_reg.callback = &hci_event_handler;
     hci_add_event_handler(&hci_event_cb_reg);
 
+    hci_power_control(HCI_POWER_ON);
+
     sm_set_io_capabilities(IO_CAPABILITY_NO_INPUT_NO_OUTPUT);
     sm_set_authentication_requirements(SM_AUTHREQ_BONDING);
 
-    printf("[BLE Server] Server initialized.\n");
+    LOGI(MODULE, "Server initialized.");
 }
 
 void BleServer::startAdvertising()
@@ -193,7 +199,9 @@ void BleServer::startAdvertising()
     gap_advertisements_set_data(sizeof(adv_data), const_cast<uint8_t *>(adv_data));
     gap_advertisements_enable(1);
 
-    printf("[BLE Server] Advertising as \"KHAMOSAYEE\"...\n");
+    bd_addr_t local_addr;
+    gap_local_bd_addr(local_addr);
+    LOGI(MODULE, "Advertising as \"KHAMOSAYEE\" (%s)...", bd_addr_to_str(local_addr));
 }
 
 void BleServer::update(const CalypsoData *data)
