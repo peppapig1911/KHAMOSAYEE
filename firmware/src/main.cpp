@@ -6,9 +6,10 @@
 
 #include "pid.h"
 
-#include "sensors/odometry.h"
 
 #include "actuators/servo_motor.h"
+
+#include "sensors/odometry.h"
 #include "sensors/calypso_anemometer.h"
 #include "sensors/cmps12.h"
 #include "sensors/zed_f9p.h"
@@ -209,7 +210,8 @@ int main()
 
     BaseType_t xReturned;
 
-    xReturned = xTaskCreate(odometry_task, "Odom_Task", 512, NULL, 2, NULL);
+    static Odometry odometry;
+    xReturned = xTaskCreate(Odometry::task, "Odom_Task", 512, &odometry, 2, NULL);
 
     if (xReturned == pdPASS)
     {
