@@ -29,14 +29,12 @@ project(khamosayee C CXX ASM)
 pico_sdk_init()
 
 
-# Exclure navigation.cpp du build
 file(GLOB SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/*.c
     ${CMAKE_CURRENT_LIST_DIR}/src/**/*.c
     ${CMAKE_CURRENT_LIST_DIR}/src/*.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/**/*.cpp
 )
-list(FILTER SOURCES EXCLUDE REGEX ".*src/navigation\\.cpp$")
 
 add_executable(khamosayee ${SOURCES})
 
