@@ -15,11 +15,14 @@ extern "C"
 
 CalypsoAnemometer calypso;
 BleServer ble_server;
-ServoMotor front_wheel(6, 50, 160);
+static constexpr float ARRIVAL_RADIUS = 0.75f;
+static constexpr float SIM_STEP = 0.20f;
+static float front_wheel_center_deg = FRONT_WHEEL_CENTER_DEG;
+static constexpr float FRONT_WHEEL_NEUTRAL_POS =
+    (FRONT_WHEEL_CENTER_DEG - FRONT_WHEEL_MIN_DEG) / (FRONT_WHEEL_MAX_DEG - FRONT_WHEEL_MIN_DEG);
+ServoMotor front_wheel(6, FRONT_WHEEL_MIN_DEG, FRONT_WHEEL_MAX_DEG, FRONT_WHEEL_NEUTRAL_POS);
 ServoMotor sail(7, 0, 250);
 CMPS12 cmps12(i2c1);
-
-static constexpr float FRONT_WHEEL_CENTER_DEG = 133.0f;
 
 volatile float last_known_wind = 0.0f; 
 
@@ -97,6 +100,41 @@ static bool parse_manual_angle_command(const char *input, float &angle_deg)
     return true;
 }
 
+static bool parse_position_update_command(const char *input, float &x, float &y)
+{
+    return sscanf(input, "p %f %f", &x, &y) == 2;
+}
+
+static bool parse_center_command(const char *input, float &center_deg)
+{
+    float requested_center = 0.0f;
+
+    if (sscanf(input, "center %f", &requested_center) != 1)
+        return false;
+
+    if (requested_center < FRONT_WHEEL_MIN_DEG)
+        requested_center = FRONT_WHEEL_MIN_DEG;
+    if (requested_center > FRONT_WHEEL_MAX_DEG)
+        requested_center = FRONT_WHEEL_MAX_DEG;
+
+    center_deg = requested_center;
+    return true;
+}
+
+static bool parse_direct_degree_input(const char *input, float &angle_deg)
+{
+    float requested_angle = 0.0f;
+
+    if (sscanf(input, "%f", &requested_angle) != 1)
+        return false;
+
+    if (requested_angle < FRONT_WHEEL_MIN_DEG || requested_angle > FRONT_WHEEL_MAX_DEG)
+        return false;
+
+    angle_deg = requested_angle;
+    return true;
+}
+
 
 int read_int()
 {
@@ -141,6 +179,7 @@ int main()
     sail.init();
     front_wheel.init();
     navigation_init(); 
+    navigation_set_center_deg(front_wheel_center_deg);
 
     if (cyw43_arch_init())
     {
@@ -179,7 +218,8 @@ int main()
     float target_y = 0.0f;
     float x_actuel = 0.0f;
     float y_actuel = 0.0f;
-    bool target_just_updated = false;
+    bool has_current_position = false;
+    bool simulate_position = true;
 
     static char input_buf[64];
     static int input_idx = 0;
@@ -206,10 +246,25 @@ int main()
                 input_buf[input_idx] = '\0';
 
                 float manual_angle = 0.0f;
-                if (parse_manual_angle_command(input_buf, manual_angle))
+                float new_center = 0.0f;
+                if (parse_center_command(input_buf, new_center))
+                {
+                    front_wheel_center_deg = new_center;
+                    navigation_set_center_deg(front_wheel_center_deg);
+                    front_wheel.rotate_deg(front_wheel_center_deg);
+                    printf("Nouveau neutre applique : %.1f deg\n", front_wheel_center_deg);
+                    target_prompt_printed = false;
+                }
+                else if (parse_manual_angle_command(input_buf, manual_angle))
                 {
                     front_wheel.rotate_deg(manual_angle);
                     printf("Angle servo applique : %.1f deg\n", manual_angle);
+                    target_prompt_printed = false;
+                }
+                else if (parse_direct_degree_input(input_buf, manual_angle))
+                {
+                    front_wheel.rotate_deg(manual_angle);
+                    printf("Angle servo applique (direct): %.1f deg\n", manual_angle);
                     target_prompt_printed = false;
                 }
                 else if (phase == SystemPhase::CALIBRATION)
@@ -222,20 +277,52 @@ int main()
                 }
                 else if (phase == SystemPhase::WAIT_TARGET || phase == SystemPhase::NAVIGATION)
                 {
+                    float pos_x, pos_y;
                     float new_x, new_y;
-                    if (sscanf(input_buf, "%f %f", &new_x, &new_y) == 2)
+
+                    if (strcmp(input_buf, "sim on") == 0)
+                    {
+                        simulate_position = true;
+                        has_current_position = true;
+                        printf("Simulation position activee.\n");
+                        target_prompt_printed = false;
+                    }
+                    else if (strcmp(input_buf, "sim off") == 0)
+                    {
+                        simulate_position = false;
+                        has_current_position = false;
+                        printf("Simulation position desactivee. Attente de p x y.\n");
+                        target_prompt_printed = false;
+                    }
+                    else if (parse_position_update_command(input_buf, pos_x, pos_y))
+                    {
+                        x_actuel = pos_x;
+                        y_actuel = pos_y;
+                        simulate_position = false;
+                        has_current_position = true;
+                        printf("Position courante mise a jour : (%.2f, %.2f) [mode reel]\n", x_actuel, y_actuel);
+                        target_prompt_printed = false;
+                    }
+                    else if (sscanf(input_buf, "%f %f", &new_x, &new_y) == 2)
                     {
                         target_x = new_x;
                         target_y = new_y;
-                        navigation_init();
-                        target_just_updated = true;
+                        
+                        navigation_init(); 
+                        
+                        if (simulate_position)
+                        {
+                            x_actuel = 0.0f;
+                            y_actuel = 0.0f;
+                            has_current_position = true;
+                        }
                         printf("Nouvelle cible validee : (%.2f, %.2f)\n", target_x, target_y);
                         phase = SystemPhase::NAVIGATION;
                         target_prompt_printed = false;
                     }
                     else if (input_buf[0] != '\0')
                     {
-                        printf("Format invalide. Entrez: x y\n");
+                        printf("Format invalide. Entrez: x y | p x y | sim on | sim off | center <deg>\n");
                         target_prompt_printed = false;
                     }
                 }
@@ -270,10 +357,12 @@ int main()
         if (phase == SystemPhase::SERVO_ZERO)
         {
             // Position neutre de direction (a calibrer selon la mecanique).
-            front_wheel.rotate_deg(FRONT_WHEEL_CENTER_DEG);
+            front_wheel.rotate_deg(front_wheel_center_deg);
             navigation_init();
-            printf("[PHASE 2] Servo direction positionne au neutre (%.1f deg).\n", FRONT_WHEEL_CENTER_DEG);
+            navigation_set_center_deg(front_wheel_center_deg);
+            printf("[PHASE 2] Servo direction positionne au neutre (%.1f deg).\n", front_wheel_center_deg);
             printf("[PHASE 3] Entrez la cible: x y (ou angle manuel: a <deg>)\n");
+            printf("Sans GPS, la simulation est activee (sim on).\n");
             phase = SystemPhase::WAIT_TARGET;
             target_prompt_printed = false;
             sleep_ms(20);
@@ -284,7 +373,7 @@ int main()
         {
             if (!target_prompt_printed)
             {
-                printf("Entrer nouvelle cible x y ou a <deg> : ");
+                printf("Entrer cible x y, position p x y, sim on/sim off ou a <deg> : ");
                 target_prompt_printed = true;
             }
 
@@ -293,18 +382,37 @@ int main()
         }
 
         // phase == NAVIGATION
-        if (!target_just_updated)
+        if (!has_current_position && !simulate_position)
         {
-            x_actuel += 1.0f;
-            y_actuel += 1.0f;
+            printf("Position inconnue: envoyez p x y ou sim on.\n");
+            sleep_ms(250);
+            continue;
         }
-        else
+
+        if (!has_current_position && simulate_position)
         {
-            target_just_updated = false;
+            x_actuel = 0.0f;
+            y_actuel = 0.0f;
+            has_current_position = true;
+            printf("Simulation position initialisee a (0.00, 0.00).\n");
         }
 
         float dx = target_x - x_actuel;
         float dy = target_y - y_actuel;
+        float distance_to_target = sqrtf(dx * dx + dy * dy);
+
+        if (distance_to_target <= ARRIVAL_RADIUS)
+        {
+            front_wheel.rotate_deg(front_wheel_center_deg);
+            navigation_init();
+            navigation_set_center_deg(front_wheel_center_deg);
+            printf("Cible atteinte (dist=%.2f). Direction au neutre (%.1f deg).\n", distance_to_target, front_wheel_center_deg);
+            phase = SystemPhase::WAIT_TARGET;
+            target_prompt_printed = false;
+            sleep_ms(100);
+            continue;
+        }
+
         float cap_cible_gps = cap_vers_point(dx, dy);
 
         float wind_gap = calculate_heading_error(last_known_wind, cap_cible_gps);
@@ -325,8 +433,21 @@ int main()
         if (cap_to_follow >= 360.0f)
             cap_to_follow -= 360.0f;
 
+        printf("Pos:(%.2f, %.2f) -> Cible:(%.2f, %.2f) | Dist:%.2f | CapSuivi:%.1f\n",
+               x_actuel, y_actuel, target_x, target_y, distance_to_target, cap_to_follow);
         steer_to_heading(cap_to_follow, cmps12, front_wheel);
-        sleep_ms(1000);
+
+        if (simulate_position && distance_to_target > 0.0f)
+        {
+            float ratio = SIM_STEP / distance_to_target;
+            if (ratio > 1.0f)
+                ratio = 1.0f;
+
+            x_actuel += dx * ratio;
+            y_actuel += dy * ratio;
+        }
+
+        sleep_ms(150);
     }
 
     return 0;
