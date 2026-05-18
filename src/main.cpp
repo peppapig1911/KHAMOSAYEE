@@ -15,11 +15,11 @@ extern "C"
 
 CalypsoAnemometer calypso;
 BleServer ble_server;
-ServoMotor front_wheel(6, 40, 160);
+ServoMotor front_wheel(6, 50, 160);
 ServoMotor sail(7, 0, 250);
 CMPS12 cmps12(i2c1);
 
-static constexpr float FRONT_WHEEL_CENTER_DEG = 60.0f;
+static constexpr float FRONT_WHEEL_CENTER_DEG = 133.0f;
 
 volatile float last_known_wind = 0.0f; 
 
@@ -179,6 +179,7 @@ int main()
     float target_y = 0.0f;
     float x_actuel = 0.0f;
     float y_actuel = 0.0f;
+    bool target_just_updated = false;
 
     static char input_buf[64];
     static int input_idx = 0;
@@ -219,13 +220,15 @@ int main()
                         phase = SystemPhase::SERVO_ZERO;
                     }
                 }
-                else if (phase == SystemPhase::WAIT_TARGET)
+                else if (phase == SystemPhase::WAIT_TARGET || phase == SystemPhase::NAVIGATION)
                 {
                     float new_x, new_y;
                     if (sscanf(input_buf, "%f %f", &new_x, &new_y) == 2)
                     {
                         target_x = new_x;
                         target_y = new_y;
+                        navigation_init();
+                        target_just_updated = true;
                         printf("Nouvelle cible validee : (%.2f, %.2f)\n", target_x, target_y);
                         phase = SystemPhase::NAVIGATION;
                         target_prompt_printed = false;
@@ -290,8 +293,15 @@ int main()
         }
 
         // phase == NAVIGATION
-        x_actuel += 1.0f;
-        y_actuel += 1.0f;
+        if (!target_just_updated)
+        {
+            x_actuel += 1.0f;
+            y_actuel += 1.0f;
+        }
+        else
+        {
+            target_just_updated = false;
+        }
 
         float dx = target_x - x_actuel;
         float dy = target_y - y_actuel;

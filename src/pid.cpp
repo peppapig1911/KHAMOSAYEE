@@ -17,9 +17,12 @@ float PID::compute(float error, float dt)
         _integral = -_integral_max;
     float I = _kI * _integral;
 
-    // Terme dérivé
-    float derivative = (error - _prev_error) / dt;
+    // Terme dérivé: evite le pic au premier echantillon apres reset
+    float derivative = 0.0f;
+    if (_has_prev_error && dt > 0.0f)
+        derivative = (error - _prev_error) / dt;
     _prev_error = error;
+    _has_prev_error = true;
     float D = _kD * derivative;
 
     return P + I + D;
@@ -29,4 +32,5 @@ void PID::reset()
 {
     _integral = 0.0f;
     _prev_error = 0.0f;
+    _has_prev_error = false;
 }
