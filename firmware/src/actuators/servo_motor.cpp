@@ -17,8 +17,6 @@ void ServoMotor::init()
     pwm_set_wrap(slice_num, 20000);    // 1 MHz / 20000 = 50 Hz
 
     pwm_set_enabled(slice_num, true);
-
-    reset();
 }
 
 void ServoMotor::rotate(float position) const
