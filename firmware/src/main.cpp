@@ -20,6 +20,7 @@
 
 #include "FreeRTOS.h"
 #include "task.h"
+#include <cmath>
 
 #define DT 0.15f
 #define DEADBAND 2.0f
@@ -37,6 +38,7 @@ static CalypsoAnemometer calypso;
 
 static BleServer ble_server;
 
+static Odometry odometry;
 static CMPS12 cmps12(i2c1);
 static ZedF9P gps(i2c1);
 
@@ -87,29 +89,85 @@ static void on_wind_data(const CalypsoData *data)
     ble_server.update(data);
 }
 
+// Serial output format (one pair per second):
+//   RAW,<lat>,<lon>,<hacc_cm>,<fix_type>,<num_sv>,<rtk_state>
+//   CORR,<lat>,<lon>,<drift_m>          (odometry dead-reckoning from last <5cm anchor)
+//   CORR,NO_ANCHOR                       (no sub-5cm fix seen yet)
+//   RAW,NO_FIX / CORR,NO_FIX            (no GPS data)
+static constexpr float  RTK_ANCHOR_THRESHOLD_M = 0.05f;
+static constexpr double EARTH_RADIUS_M         = 6371000.0;
+
+struct PosTaskParam { ZedF9P *gps; Odometry *odometry; CMPS12 *compass; };
+
 static void print_position_task(void *param)
 {
-    auto *gps_device = static_cast<ZedF9P *>(param);
+    auto *p = static_cast<PosTaskParam *>(param);
+
+    bool   anchor_valid  = false;
+    double anchor_lat    = 0.0, anchor_lon = 0.0;
+    float  anchor_odo_x  = 0.0f, anchor_odo_y = 0.0f;
+    float  theta_offset  = 0.0f;
 
     while (true)
     {
-        if (gps_device->update())
+        if (p->gps->update())
         {
-            const auto &position = gps_device->data();
-            LOGI(MODULE,
-                 "POS lat=%.7f lon=%.7f alt=%.1f hacc=%.1fcm vacc=%.1fcm  fix=%u sats=%u rtk=%u",
-                 position.lat,
-                 position.lon,
-                 position.altitude,
-                 position.h_acc * 100.0f,
-                 position.v_acc * 100.0f,
-                 position.fix_type,
-                 position.num_sv,
-                 static_cast<unsigned>(gps_device->rtk_state()));
+            const GNSSData &g   = p->gps->data();
+            RobotPosition   odo = p->odometry->getPosition();
+
+            if (g.valid)
+            {
+                if (g.h_acc < RTK_ANCHOR_THRESHOLD_M)
+                {
+                    // Recompute the odometry->ENU rotation on every good fix so
+                    // it stays time-consistent with the anchor and re-zeroes
+                    // accumulated odometry heading drift against the compass.
+                    float cap_rad = p->compass->navigation().cap * (float)M_PI / 180.0f;
+                    theta_offset  = ((float)M_PI / 2.0f - cap_rad) - odo.theta;
+                    anchor_valid  = true;
+                    anchor_lat    = g.lat;
+                    anchor_lon    = g.lon;
+                    anchor_odo_x  = odo.x;
+                    anchor_odo_y  = odo.y;
+                }
+
+                printf("RAW,%.7f,%.7f,%.2f,%u,%u,%u\n",
+                       g.lat, g.lon, g.h_acc * 100.0f,
+                       g.fix_type, g.num_sv,
+                       static_cast<unsigned>(p->gps->rtk_state()));
+
+                if (anchor_valid)
+                {
+                    if (g.h_acc >= RTK_ANCHOR_THRESHOLD_M)
+                    {
+                        float dx = (odo.x - anchor_odo_x) / 100.0f;
+                        float dy = (odo.y - anchor_odo_y) / 100.0f;
+                        float dx_enu = dx * cosf(theta_offset) - dy * sinf(theta_offset);
+                        float dy_enu = dx * sinf(theta_offset) + dy * cosf(theta_offset);
+                        double corr_lat = anchor_lat + (double)dy_enu / EARTH_RADIUS_M * (180.0 / M_PI);
+                        double corr_lon = anchor_lon + (double)dx_enu / (EARTH_RADIUS_M * cos(anchor_lat * M_PI / 180.0)) * (180.0 / M_PI);
+                        printf("CORR,%.7f,%.7f,%.3f\n", corr_lat, corr_lon, sqrtf(dx_enu*dx_enu + dy_enu*dy_enu));
+                    }
+                    else
+                    {
+                        printf("CORR,%.7f,%.7f,0.000\n", g.lat, g.lon);
+                    }
+                }
+                else
+                {
+                    printf("CORR,NO_ANCHOR\n");
+                }
+            }
+            else
+            {
+                printf("RAW,NO_FIX\n");
+                printf("CORR,NO_FIX\n");
+            }
         }
         else
         {
-            LOGD(MODULE, "No fix");
+            printf("RAW,NO_FIX\n");
+            printf("CORR,NO_FIX\n");
         }
 
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -181,11 +239,12 @@ static void wifi_init_task(void *param)
         tskIDLE_PRIORITY,
         NULL);
 
+    static PosTaskParam pos_param = {&gps, &odometry, &cmps12};
     xTaskCreate(
         print_position_task,
         "posTask",
         2048,
-        (void *)&gps,
+        (void *)&pos_param,
         tskIDLE_PRIORITY,
         NULL);
 
@@ -210,7 +269,6 @@ int main()
 
     BaseType_t xReturned;
 
-    static Odometry odometry;
     xReturned = xTaskCreate(Odometry::task, "Odom_Task", 512, &odometry, 2, NULL);
 
     if (xReturned == pdPASS)
