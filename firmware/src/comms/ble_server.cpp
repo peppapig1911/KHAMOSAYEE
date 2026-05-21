@@ -5,6 +5,10 @@
  *     └── Apparent Wind Direction 0x2A73  READ | NOTIFY
  *   Battery Service 0x180F
  *     └── Battery Level           0x2A19  READ | NOTIFY
+ *   Location and Navigation Service 0x1819
+ *     ├── Latitude                0x2A69  READ | NOTIFY
+ *     ├── Longitude               0x2A6A  READ | NOTIFY
+ *     └── Altitude                0x2A6B  READ | NOTIFY
  */
 
 #include "comms/ble_server.h"
@@ -23,7 +27,7 @@
 // ---------------------------------------------------------------------------
 
 // Flags: LE General Discoverable | BR/EDR Not Supported
-// Complete 16-bit UUIDs: 0x181A (ESS), 0x180F (Battery)
+// Complete 16-bit UUIDs: 0x181A (ESS), 0x180F (Battery), 0x1819 (LNS)
 // Complete Local Name: "KHAMOSAYEE"
 static const uint8_t adv_data[] = {
     // Flags
@@ -37,6 +41,8 @@ static const uint8_t adv_data[] = {
     0x18, // ESS
     0x0F,
     0x18, // Battery
+    0x19,
+    0x18, // Location and Navigation
     // Complete local name
     0x0C,
     BLUETOOTH_DATA_TYPE_COMPLETE_LOCAL_NAME,
@@ -59,6 +65,9 @@ static const uint8_t adv_data[] = {
 static uint16_t current_wind_speed_raw = 0;     // 0.01 m/s units
 static uint16_t current_wind_direction_raw = 0; // 0.01 degree units
 static uint8_t current_battery_pct = 0;         // 0-100
+static int32_t current_latitude_raw = 0;        // 1e-7 degrees
+static int32_t current_longitude_raw = 0;       // 1e-7 degrees
+static int32_t current_altitude_raw = 0;        // millimeters
 
 static hci_con_handle_t con_handle = HCI_CON_HANDLE_INVALID;
 
@@ -92,6 +101,18 @@ static uint16_t att_read_callback(hci_con_handle_t connection_handle,
     if (att_handle == ATT_CHARACTERISTIC_0x2A19_01_VALUE_HANDLE)
         return att_read_callback_handle_byte(
             current_battery_pct, offset, buffer, buffer_size);
+
+    if (att_handle == ATT_CHARACTERISTIC_0x2A69_01_VALUE_HANDLE)
+        return att_read_callback_handle_little_endian_32(
+            current_latitude_raw, offset, buffer, buffer_size);
+
+    if (att_handle == ATT_CHARACTERISTIC_0x2A6A_01_VALUE_HANDLE)
+        return att_read_callback_handle_little_endian_32(
+            current_longitude_raw, offset, buffer, buffer_size);
+
+    if (att_handle == ATT_CHARACTERISTIC_0x2A6B_01_VALUE_HANDLE)
+        return att_read_callback_handle_little_endian_32(
+            current_altitude_raw, offset, buffer, buffer_size);
 
     return 0;
 }
@@ -226,4 +247,28 @@ void BleServer::update(const CalypsoData *data)
     att_server_notify(con_handle,
                       ATT_CHARACTERISTIC_0x2A19_01_VALUE_HANDLE,
                       &current_battery_pct, 1);
+}
+
+void BleServer::updateLocation(const GNSSData *data)
+{
+    current_latitude_raw = static_cast<int32_t>(data->lat * 10000000.0);
+    current_longitude_raw = static_cast<int32_t>(data->lon * 10000000.0);
+    current_altitude_raw = static_cast<int32_t>(data->altitude * 1000.0f);
+
+    if (con_handle == HCI_CON_HANDLE_INVALID)
+        return;
+
+    att_server_request_can_send_now_event(con_handle);
+
+    att_server_notify(con_handle,
+                      ATT_CHARACTERISTIC_0x2A69_01_VALUE_HANDLE,
+                      reinterpret_cast<uint8_t *>(&current_latitude_raw), 4);
+
+    att_server_notify(con_handle,
+                      ATT_CHARACTERISTIC_0x2A6A_01_VALUE_HANDLE,
+                      reinterpret_cast<uint8_t *>(&current_longitude_raw), 4);
+
+    att_server_notify(con_handle,
+                      ATT_CHARACTERISTIC_0x2A6B_01_VALUE_HANDLE,
+                      reinterpret_cast<uint8_t *>(&current_altitude_raw), 4);
 }
