@@ -4,7 +4,6 @@
 #include "hardware/i2c.h"
 #include "btstack.h"
 
-#include "actuators/servo_motor.h"
 #include "sensors/odometry.h"
 #include "sensors/calypso_anemometer.h"
 #include "sensors/cmps12.h"
@@ -12,6 +11,9 @@
 
 #include "comms/ble_server.h"
 #include "comms/ntrip_client.h"
+
+#include "command/wheel.h"
+#include "command/sail.h"
 #include "log.h"
 #include "navigation.h"
 
@@ -24,12 +26,7 @@
 static constexpr const char *MODULE = "Main";
 
 static constexpr float ARRIVAL_RADIUS = 0.75f;
-static float front_wheel_center_deg = FRONT_WHEEL_CENTER_DEG;
-static constexpr float FRONT_WHEEL_NEUTRAL_POS =
-    (FRONT_WHEEL_CENTER_DEG - FRONT_WHEEL_MIN_DEG) / (FRONT_WHEEL_MAX_DEG - FRONT_WHEEL_MIN_DEG);
 
-static ServoMotor front_wheel(6, FRONT_WHEEL_MIN_DEG, FRONT_WHEEL_MAX_DEG, FRONT_WHEEL_NEUTRAL_POS);
-static ServoMotor sail(7, 0, 250);
 
 static CalypsoAnemometer calypso;
 static BleServer ble_server;
@@ -38,52 +35,16 @@ static CMPS12 cmps12(i2c1);
 static ZedF9P gps(i2c1);
 static NtripClient ntrip("crtk.net", 2101, "IGNU", &gps, &gps);
 
+
 static volatile float last_known_wind = 0.0f;
 
-static float sail_angle_from_wind(float wind_direction_deg)
-{
-    float wind = wind_direction_deg;
-
-    while (wind < 0.0f)
-        wind += 360.0f;
-    while (wind >= 360.0f)
-        wind -= 360.0f;
-
-    float beta = wind;
-    if (beta > 180.0f)
-        beta = 360.0f - beta;
-
-    float delta = beta - 15.0f;
-    if (delta < 0.0f)
-        delta = 0.0f;
-    if (delta > 90.0f)
-        delta = 90.0f;
-
-    return 180.0f - (delta * 2.0f);
-}
-
-static void control_sail_from_wind(float wind_direction_deg)
-{
-    sail.rotate_deg(sail_angle_from_wind(wind_direction_deg));
-}
-
+// Callback pour l'anémomètre
 static void on_wind_data(const CalypsoData *data)
 {
     last_known_wind = data->wind_direction;
-    control_sail_from_wind(data->wind_direction);
+    sail_set_angle_from_wind(data->wind_direction);
     LOGD(MODULE, "Wind speed: %.2f m/s | direction: %.1f deg | battery: %.2f V", data->wind_speed, data->wind_direction, data->battery);
     ble_server.update(data);
-}
-
-static float cap_vers_point(float dx, float dy)
-{
-    float angle_rad = atan2f(dx, dy); // dx=East, dy=North
-    float cap = angle_rad * 180.0f / M_PI;
-
-    if (cap < 0.0f)
-        cap += 360.0f;
-
-    return cap;
 }
 
 struct LocalProjection
@@ -103,9 +64,12 @@ static bool project_gps_to_local_xy(const GNSSData &gnss, LocalProjection &proje
 
     if (!projection.has_origin)
     {
+        if (gnss.fix_type < 3)  // attendre fix 3D minimum avant de fixer l'origine
+            return false;
         projection.origin_lat = gnss.lat;
         projection.origin_lon = gnss.lon;
         projection.has_origin = true;
+        LOGI(MODULE, "Origine GPS fixee : lat=%.7f lon=%.7f", gnss.lat, gnss.lon);
     }
 
     const double dlat = (gnss.lat - projection.origin_lat) * DEG_TO_RAD;
@@ -134,38 +98,6 @@ static bool project_lat_lon_to_local_xy(double lat, double lon, const LocalProje
     return true;
 }
 
-static bool parse_manual_angle_command(const char *input, float &angle_deg)
-{
-    float requested_angle = 0.0f;
-
-    if (sscanf(input, "a %f", &requested_angle) != 1)
-        return false;
-
-    if (requested_angle < 0.0f)
-        requested_angle = 0.0f;
-    if (requested_angle > 180.0f)
-        requested_angle = 180.0f;
-
-    angle_deg = requested_angle;
-    return true;
-}
-
-static bool parse_center_command(const char *input, float &center_deg)
-{
-    float requested_center = 0.0f;
-
-    if (sscanf(input, "center %f", &requested_center) != 1)
-        return false;
-
-    if (requested_center < FRONT_WHEEL_MIN_DEG)
-        requested_center = FRONT_WHEEL_MIN_DEG;
-    if (requested_center > FRONT_WHEEL_MAX_DEG)
-        requested_center = FRONT_WHEEL_MAX_DEG;
-
-    center_deg = requested_center;
-    return true;
-}
-
 static bool parse_lat_lon_command(const char *input, double &lat, double &lon)
 {
     if (sscanf(input, "ll %lf %lf", &lat, &lon) == 2)
@@ -175,45 +107,26 @@ static bool parse_lat_lon_command(const char *input, double &lat, double &lon)
     return false;
 }
 
-static bool parse_direct_degree_input(const char *input, float &angle_deg)
-{
-    float requested_angle = 0.0f;
-
-    if (sscanf(input, "%f", &requested_angle) != 1)
-        return false;
-
-    if (requested_angle < FRONT_WHEEL_MIN_DEG || requested_angle > FRONT_WHEEL_MAX_DEG)
-        return false;
-
-    angle_deg = requested_angle;
-    return true;
-}
-
 static void print_position_task(void *param)
 {
     auto *gps_device = static_cast<ZedF9P *>(param);
 
     while (true)
     {
-        if (gps_device->update())
-        {
+        if (gps_device->update()){
+
             const auto &position = gps_device->data();
             LOGI(MODULE,
-                 "POS lat=%.7f lon=%.7f alt=%.1f hacc=%.1fcm vacc=%.1fcm fix=%u sats=%u rtk=%u",
-                 position.lat,
-                 position.lon,
-                 position.altitude,
-                 position.h_acc * 100.0f,
-                 position.v_acc * 100.0f,
-                 position.fix_type,
-                 position.num_sv,
-                 static_cast<unsigned>(gps_device->rtk_state()));
+                "POS lat=%.7f lon=%.7f alt=%.1f hacc=%.1fcm vacc=%.1fcm fix=%u sats=%u rtk=%u",
+                position.lat,
+                position.lon,
+                position.altitude,
+                position.h_acc * 100.0f,
+                position.v_acc * 100.0f,
+                position.fix_type,
+                position.num_sv,
+                static_cast<unsigned>(gps_device->rtk_state()));
         }
-        else
-        {
-            LOGD(MODULE, "No fix");
-        }
-
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
@@ -235,7 +148,7 @@ static void wifi_init_task(void *param)
     cyw43_arch_enable_sta_mode();
     while (true)
     {
-        int wifi_result = cyw43_arch_wifi_connect_timeout_ms("Rover", "00990088", CYW43_AUTH_WPA2_AES_PSK, 20000);
+        int wifi_result = cyw43_arch_wifi_connect_timeout_ms("iPhone de Christine", "etbahnonlol", CYW43_AUTH_WPA2_AES_PSK, 20000);
         if (wifi_result == 0)
             break;
 
@@ -321,25 +234,30 @@ static void navigation_console_task(void *param)
                 input_buf[input_idx] = '\0';
 
                 float manual_angle = 0.0f;
+                float sail_angle = 0.0f;
                 float new_center = 0.0f;
-                if (parse_center_command(input_buf, new_center))
+                if (wheel_parse_center_command(input_buf, new_center))
                 {
-                    front_wheel_center_deg = new_center;
-                    navigation_set_center_deg(front_wheel_center_deg);
-                    front_wheel.rotate_deg(front_wheel_center_deg);
-                    LOGI(MODULE, "Nouveau neutre applique : %.1f deg", front_wheel_center_deg);
+                    wheel_set_center_deg(new_center);
+                    LOGI(MODULE, "Nouveau neutre applique : %.1f deg", wheel_get_center_deg());
                     target_prompt_printed = false;
                 }
-                else if (parse_manual_angle_command(input_buf, manual_angle))
+                else if (wheel_parse_manual_angle_command(input_buf, manual_angle))
                 {
-                    front_wheel.rotate_deg(manual_angle);
+                    wheel_rotate_deg(manual_angle);
                     LOGI(MODULE, "Angle servo applique : %.1f deg", manual_angle);
                     target_prompt_printed = false;
                 }
-                else if (parse_direct_degree_input(input_buf, manual_angle))
+                else if (wheel_parse_direct_degree_input(input_buf, manual_angle))
                 {
-                    front_wheel.rotate_deg(manual_angle);
+                    wheel_rotate_deg(manual_angle);
                     LOGI(MODULE, "Angle servo applique (direct): %.1f deg", manual_angle);
+                    target_prompt_printed = false;
+                }
+                else if (sail_parse_console_command(input_buf, &sail_angle))
+                {
+                    sail_set_manual_angle(sail_angle);
+                    LOGI(MODULE, "Voile angle manuel applique : %.1f deg", sail_angle);
                     target_prompt_printed = false;
                 }
                 else if (phase == SystemPhase::CALIBRATION)
@@ -401,7 +319,6 @@ static void navigation_console_task(void *param)
 
                 if (calib.sys == 3)
                 {
-                    LOGI(MODULE, "[PHASE 1] Calibration terminee.");
                     phase = SystemPhase::SERVO_ZERO;
                 }
             }
@@ -412,10 +329,10 @@ static void navigation_console_task(void *param)
 
         if (phase == SystemPhase::SERVO_ZERO)
         {
-            front_wheel.rotate_deg(front_wheel_center_deg);
+            wheel_rotate_to_center();
             navigation_init();
-            navigation_set_center_deg(front_wheel_center_deg);
-            LOGI(MODULE, "[PHASE 2] Servo direction positionne au neutre (%.1f deg).", front_wheel_center_deg);
+            navigation_set_center_deg(wheel_get_center_deg());
+            LOGI(MODULE, "[PHASE 2] Servo direction positionne au neutre (%.1f deg).", wheel_get_center_deg());
             LOGI(MODULE, "[PHASE 3] Entrez la cible: x y (lat lon) ou ll <lat> <lon> (ou angle manuel: a <deg>)");
             LOGI(MODULE, "Navigation GPS reelle activee (sans simulation).");
             phase = SystemPhase::WAIT_TARGET;
@@ -435,7 +352,8 @@ static void navigation_console_task(void *param)
             vTaskDelay(pdMS_TO_TICKS(20));
             continue;
         }
-
+        
+        gps.update();
         const GNSSData &fix = gps.data();
         has_current_position = project_gps_to_local_xy(fix, gps_projection, x_actuel, y_actuel);
         if (!has_current_position)
@@ -461,27 +379,30 @@ static void navigation_console_task(void *param)
 
         if (distance_to_target <= ARRIVAL_RADIUS)
         {
-            front_wheel.rotate_deg(front_wheel_center_deg);
+            wheel_rotate_to_center();
             navigation_init();
-            navigation_set_center_deg(front_wheel_center_deg);
-            LOGI(MODULE, "Cible atteinte (dist=%.2f). Direction au neutre (%.1f deg).", distance_to_target, front_wheel_center_deg);
+            navigation_set_center_deg(wheel_get_center_deg());
+            LOGI(MODULE, "Cible atteinte (dist=%.2f). Direction au neutre (%.1f deg).", distance_to_target, wheel_get_center_deg());
             phase = SystemPhase::WAIT_TARGET;
             target_prompt_printed = false;
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
 
-        float cap_cible = cap_vers_point(dx, dy);
+        float cap_cible = wheel_compute_bearing_deg(dx, dy);
 
-        float wind_gap = calculate_heading_error(last_known_wind, cap_cible);
+        taskENTER_CRITICAL();
+        float wind = last_known_wind;
+        taskEXIT_CRITICAL();
+        float wind_gap = calculate_heading_error(wind, cap_cible);
         float cap_to_follow = cap_cible;
 
         if (fabsf(wind_gap) < 45.0f)
         {
             if (wind_gap >= 0.0f)
-                cap_to_follow = last_known_wind + 45.0f;
+                cap_to_follow = wind+ 45.0f;
             else
-                cap_to_follow = last_known_wind - 45.0f;
+                cap_to_follow = wind - 45.0f;
         }
 
         if (cap_to_follow < 0.0f)
@@ -498,7 +419,7 @@ static void navigation_console_task(void *param)
              distance_to_target,
              cap_to_follow);
 
-        steer_to_heading(cap_to_follow, cmps12, front_wheel);
+        wheel_steer_to_heading(cap_to_follow, cmps12);
 
         vTaskDelay(pdMS_TO_TICKS(150));
     }
@@ -519,10 +440,10 @@ int main()
     gpio_pull_up(27);
     i2c_init(i2c1, 100 * 1000);
 
-    sail.init();
-    front_wheel.init();
+    sail_init();
+    wheel_init();
     navigation_init();
-    navigation_set_center_deg(front_wheel_center_deg);
+    navigation_set_center_deg(wheel_get_center_deg());
 
     static Odometry odometry;
     BaseType_t xReturned = xTaskCreate(Odometry::task, "Odom_Task", 512, &odometry, 2, NULL);
