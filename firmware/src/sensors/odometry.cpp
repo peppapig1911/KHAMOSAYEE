@@ -114,9 +114,9 @@ void Odometry::task(void *param)
         self->update();
 
         RobotPosition pos = self->getPosition();
-        printf("x=%.1f y=%.1f theta=%.2f  L:%.2fkm/h R:%.2fkm/h\n",
-               pos.x, pos.y, pos.theta,
-               self->getSpeedKmh(0),
-               self->getSpeedKmh(1));
+        // printf("x=%.1f y=%.1f theta=%.2f  L:%.2fkm/h R:%.2fkm/h\n",
+        //        pos.x, pos.y, pos.theta,
+        //        self->getSpeedKmh(0),
+        //        self->getSpeedKmh(1));
     }
 }
