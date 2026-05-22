@@ -54,9 +54,38 @@ static void on_wind_data(const CalypsoData *data)
 //   CORR,NO_ANCHOR                       (no sub-5cm fix seen yet)
 //   RAW,NO_FIX / CORR,NO_FIX            (no GPS data)
 static constexpr float  RTK_ANCHOR_THRESHOLD_M = 0.05f;
-static constexpr double EARTH_RADIUS_M         = 6371000.0;
+static constexpr double EARTH_RADIUS_M         = 6378137.0;  // WGS84 equatorial, matches the projection helpers
 
 struct PosTaskParam { ZedF9P *gps; Odometry *odometry; CMPS12 *compass; };
+
+// Best position estimate published by the GPS task (raw when the fix is good,
+// odometry dead-reckoned from the last sub-5cm anchor when it degrades) and
+// consumed by the navigation task. Guarded by a critical section because the
+// producer and consumer run as separate FreeRTOS tasks.
+struct CorrectedFix
+{
+    bool    valid    = false;
+    double  lat      = 0.0;
+    double  lon      = 0.0;
+    uint8_t fix_type = 0;
+};
+
+static CorrectedFix g_corrected_fix;
+
+static void corrected_fix_publish(bool valid, double lat, double lon, uint8_t fix_type)
+{
+    taskENTER_CRITICAL();
+    g_corrected_fix = {valid, lat, lon, fix_type};
+    taskEXIT_CRITICAL();
+}
+
+static CorrectedFix corrected_fix_get()
+{
+    taskENTER_CRITICAL();
+    CorrectedFix copy = g_corrected_fix;
+    taskEXIT_CRITICAL();
+    return copy;
+}
 
 struct LocalProjection
 {
@@ -65,40 +94,12 @@ struct LocalProjection
     double origin_lon = 0.0;
 };
 
-static bool project_gps_to_local_xy(const GNSSData &gnss, LocalProjection &projection, float &x, float &y)
-{
-    if (!gnss.valid)
-        return false;
-
-    constexpr double DEG_TO_RAD = 3.14159265358979323846 / 180.0;
-    constexpr double EARTH_RADIUS_M = 6378137.0;
-
-    if (!projection.has_origin)
-    {
-        if (gnss.fix_type < 3)  // attendre fix 3D minimum avant de fixer l'origine
-            return false;
-        projection.origin_lat = gnss.lat;
-        projection.origin_lon = gnss.lon;
-        projection.has_origin = true;
-        LOGI(MODULE, "Origine GPS fixee : lat=%.7f lon=%.7f", gnss.lat, gnss.lon);
-    }
-
-    const double dlat = (gnss.lat - projection.origin_lat) * DEG_TO_RAD;
-    const double dlon = (gnss.lon - projection.origin_lon) * DEG_TO_RAD;
-    const double origin_lat_rad = projection.origin_lat * DEG_TO_RAD;
-
-    x = static_cast<float>(EARTH_RADIUS_M * dlon * std::cos(origin_lat_rad));
-    y = static_cast<float>(EARTH_RADIUS_M * dlat);
-    return true;
-}
-
 static bool project_lat_lon_to_local_xy(double lat, double lon, const LocalProjection &projection, float &x, float &y)
 {
     if (!projection.has_origin)
         return false;
 
     constexpr double DEG_TO_RAD = 3.14159265358979323846 / 180.0;
-    constexpr double EARTH_RADIUS_M = 6378137.0;
 
     const double dlat = (lat - projection.origin_lat) * DEG_TO_RAD;
     const double dlon = (lon - projection.origin_lon) * DEG_TO_RAD;
@@ -136,12 +137,16 @@ static void print_position_task(void *param)
 
             if (g.valid)
             {
-                if (g.h_acc < RTK_ANCHOR_THRESHOLD_M)
+                float cap_deg = p->compass->navigation().cap;
+
+                if (g.h_acc < RTK_ANCHOR_THRESHOLD_M && !std::isnan(cap_deg))
                 {
                     // Recompute the odometry->ENU rotation on every good fix so
                     // it stays time-consistent with the anchor and re-zeroes
                     // accumulated odometry heading drift against the compass.
-                    float cap_rad = p->compass->navigation().cap * (float)M_PI / 180.0f;
+                    // Skip when the compass read failed (cap is NaN) so the
+                    // anchor is never poisoned with a NaN rotation.
+                    float cap_rad = cap_deg * (float)M_PI / 180.0f;
                     theta_offset  = ((float)M_PI / 2.0f - cap_rad) - odo.theta;
                     anchor_valid  = true;
                     anchor_lat    = g.lat;
@@ -155,6 +160,11 @@ static void print_position_task(void *param)
                        g.fix_type, g.num_sv,
                        static_cast<unsigned>(p->gps->rtk_state()));
 
+                // Best estimate handed to navigation: raw unless the fix is
+                // degraded and we can dead-reckon from a valid anchor.
+                double best_lat = g.lat;
+                double best_lon = g.lon;
+
                 if (anchor_valid)
                 {
                     if (g.h_acc >= RTK_ANCHOR_THRESHOLD_M)
@@ -163,9 +173,9 @@ static void print_position_task(void *param)
                         float dy = (odo.y - anchor_odo_y) / 100.0f;
                         float dx_enu = dx * cosf(theta_offset) - dy * sinf(theta_offset);
                         float dy_enu = dx * sinf(theta_offset) + dy * cosf(theta_offset);
-                        double corr_lat = anchor_lat + (double)dy_enu / EARTH_RADIUS_M * (180.0 / M_PI);
-                        double corr_lon = anchor_lon + (double)dx_enu / (EARTH_RADIUS_M * cos(anchor_lat * M_PI / 180.0)) * (180.0 / M_PI);
-                        printf("CORR,%.7f,%.7f,%.3f\n", corr_lat, corr_lon, sqrtf(dx_enu*dx_enu + dy_enu*dy_enu));
+                        best_lat = anchor_lat + (double)dy_enu / EARTH_RADIUS_M * (180.0 / M_PI);
+                        best_lon = anchor_lon + (double)dx_enu / (EARTH_RADIUS_M * cos(anchor_lat * M_PI / 180.0)) * (180.0 / M_PI);
+                        printf("CORR,%.7f,%.7f,%.3f\n", best_lat, best_lon, sqrtf(dx_enu*dx_enu + dy_enu*dy_enu));
                     }
                     else
                     {
@@ -176,17 +186,21 @@ static void print_position_task(void *param)
                 {
                     printf("CORR,NO_ANCHOR\n");
                 }
+
+                corrected_fix_publish(true, best_lat, best_lon, g.fix_type);
             }
             else
             {
                 printf("RAW,NO_FIX\n");
                 printf("CORR,NO_FIX\n");
+                corrected_fix_publish(false, 0.0, 0.0, 0);
             }
         }
         else
         {
             printf("RAW,NO_FIX\n");
             printf("CORR,NO_FIX\n");
+            corrected_fix_publish(false, 0.0, 0.0, 0);
         }
 
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -232,6 +246,11 @@ static void wifi_init_task(void *param)
         LOGI(MODULE, "GPS found and initialized.");
     }
 
+    // Start position publishing before NTRIP so navigation keeps a position
+    // source even if the RTK correction stream fails to come up.
+    static PosTaskParam pos_param = {&gps, &odometry, &cmps12};
+    xTaskCreate(print_position_task, "posTask", 2048, (void *)&pos_param, tskIDLE_PRIORITY, NULL);
+
     if (!ntrip.init())
     {
         LOGE(MODULE, "Failed to connect to NTRIP server!");
@@ -243,9 +262,6 @@ static void wifi_init_task(void *param)
     LOGI(MODULE, "All initiated!");
 
     xTaskCreate(NtripClient::task, "ntripTask", 2048, (void *)&ntrip, tskIDLE_PRIORITY, NULL);
-
-    static PosTaskParam pos_param = {&gps, &odometry, &cmps12};
-    xTaskCreate(print_position_task, "posTask", 2048, (void *)&pos_param, tskIDLE_PRIORITY, NULL);
 
     while (true)
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -417,15 +433,35 @@ static void navigation_console_task(void *param)
             continue;
         }
         
-        gps.update();
-        const GNSSData &fix = gps.data();
-        has_current_position = project_gps_to_local_xy(fix, gps_projection, x_actuel, y_actuel);
-        if (!has_current_position)
+        // Use the odometry-corrected position published by the GPS task instead
+        // of polling the module here (a single owner avoids racing the UBX
+        // parser on the shared I2C stream).
+        CorrectedFix fix = corrected_fix_get();
+        if (!fix.valid)
         {
             LOGI(MODULE, "Position GPS indisponible: attente d'un fix valide.");
             vTaskDelay(pdMS_TO_TICKS(250));
             continue;
         }
+
+        // Lock the local ENU origin on the first usable fix, then project the
+        // corrected position into the same frame as the target.
+        if (!gps_projection.has_origin)
+        {
+            if (fix.fix_type < 3)  // attendre fix 3D minimum avant de fixer l'origine
+            {
+                LOGI(MODULE, "Position GPS indisponible: attente d'un fix 3D.");
+                vTaskDelay(pdMS_TO_TICKS(250));
+                continue;
+            }
+            gps_projection.origin_lat = fix.lat;
+            gps_projection.origin_lon = fix.lon;
+            gps_projection.has_origin = true;
+            LOGI(MODULE, "Origine GPS fixee : lat=%.7f lon=%.7f", fix.lat, fix.lon);
+        }
+
+        project_lat_lon_to_local_xy(fix.lat, fix.lon, gps_projection, x_actuel, y_actuel);
+        has_current_position = true;
 
         if (target_is_latlon)
         {
