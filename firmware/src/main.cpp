@@ -4,19 +4,20 @@
 #include "hardware/i2c.h"
 #include "btstack.h"
 
+#include "FreeRTOS.h"
+#include "task.h"
+
 #include "actuators/servo_motor.h"
 #include "sensors/odometry.h"
 #include "sensors/calypso_anemometer.h"
 #include "sensors/cmps12.h"
 #include "sensors/zed_f9p.h"
+#include "comms/i2c.h"
 
 #include "comms/ble_server.h"
 #include "comms/ntrip_client.h"
 #include "log.h"
 #include "navigation.h"
-
-#include "FreeRTOS.h"
-#include "task.h"
 
 #include <cmath>
 #include <cstring>
@@ -34,8 +35,10 @@ static ServoMotor sail(7, 0, 250);
 static CalypsoAnemometer calypso;
 static BleServer ble_server;
 
-static CMPS12 cmps12(i2c1);
-static ZedF9P gps(i2c1);
+I2C i2c(i2c1, 400000, 26, 27);
+
+static CMPS12 cmps12(i2c);
+static ZedF9P gps(i2c);
 static NtripClient ntrip("crtk.net", 2101, "IGNU", &gps, &gps);
 
 static volatile float last_known_wind = 0.0f;
@@ -69,8 +72,8 @@ static void control_sail_from_wind(float wind_direction_deg)
 
 static void on_wind_data(const CalypsoData *data)
 {
-    last_known_wind = data->wind_direction;
-    control_sail_from_wind(data->wind_direction);
+    // last_known_wind = data->wind_direction;
+    // control_sail_from_wind(data->wind_direction);
     LOGD(MODULE, "Wind speed: %.2f m/s | direction: %.1f deg | battery: %.2f V", data->wind_speed, data->wind_direction, data->battery);
     ble_server.update(data);
 }
@@ -198,6 +201,7 @@ static void print_position_task(void *param)
         if (gps_device->update())
         {
             const auto &position = gps_device->data();
+            ble_server.updateLocation(&position);
             LOGI(MODULE,
                  "POS lat=%.7f lon=%.7f alt=%.1f hacc=%.1fcm vacc=%.1fcm fix=%u sats=%u rtk=%u",
                  position.lat,
@@ -223,6 +227,8 @@ static void wifi_init_task(void *param)
     UNUSED(param);
 
     vTaskDelay(pdMS_TO_TICKS(100));
+
+    LOGI(MODULE, "I2C initialized at %u baud", i2c.init());
 
     if (cyw43_arch_init())
     {
@@ -260,18 +266,19 @@ static void wifi_init_task(void *param)
     if (!ntrip.init())
     {
         LOGE(MODULE, "Failed to connect to NTRIP server!");
-        vTaskDelete(NULL);
-        return;
+    }
+    else
+    {
+        LOGI(MODULE, "Connected to NTRIP server successfully!");
     }
 
-    LOGI(MODULE, "Connected to NTRIP server successfully!");
     LOGI(MODULE, "All initiated!");
 
     xTaskCreate(NtripClient::task, "ntripTask", 2048, (void *)&ntrip, tskIDLE_PRIORITY, NULL);
     xTaskCreate(print_position_task, "posTask", 2048, (void *)&gps, tskIDLE_PRIORITY, NULL);
 
     while (true)
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(100000));
 }
 
 static void navigation_console_task(void *param)
@@ -508,32 +515,26 @@ int main()
 {
     stdio_init_all();
 
-    while (!stdio_usb_connected())
-        tight_loop_contents();
+    // while (!stdio_usb_connected())
+    //     tight_loop_contents();
 
-    LOGI(MODULE, "USB connected, starting system...");
+    // LOGI(MODULE, "USB connected, starting system...");
 
-    gpio_set_function(26, GPIO_FUNC_I2C);
-    gpio_set_function(27, GPIO_FUNC_I2C);
-    gpio_pull_up(26);
-    gpio_pull_up(27);
-    i2c_init(i2c1, 100 * 1000);
+    // sail.init();
+    // front_wheel.init();
+    // navigation_init();
+    // navigation_set_center_deg(front_wheel_center_deg);
 
-    sail.init();
-    front_wheel.init();
-    navigation_init();
-    navigation_set_center_deg(front_wheel_center_deg);
+    // static Odometry odometry;
+    // BaseType_t xReturned = xTaskCreate(Odometry::task, "Odom_Task", 512, &odometry, 2, NULL);
 
-    static Odometry odometry;
-    BaseType_t xReturned = xTaskCreate(Odometry::task, "Odom_Task", 512, &odometry, 2, NULL);
-
-    if (xReturned == pdPASS)
-        LOGI(MODULE, "Odometry started");
-    else
-        LOGI(MODULE, "Odometry launch failed");
+    // if (xReturned == pdPASS)
+    //     LOGI(MODULE, "Odometry started");
+    // else
+    //     LOGI(MODULE, "Odometry launch failed");
 
     xTaskCreate(wifi_init_task, "wifiInitTask", 2048, NULL, tskIDLE_PRIORITY + 1, NULL);
-    xTaskCreate(navigation_console_task, "navTask", 4096, NULL, tskIDLE_PRIORITY + 1, NULL);
+    // xTaskCreate(navigation_console_task, "navTask", 4096, NULL, tskIDLE_PRIORITY + 1, NULL);
 
     vTaskStartScheduler();
     return 0;

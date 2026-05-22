@@ -3,38 +3,6 @@
 #include <cmath>
 #include <cstdio>
 
-namespace
-{
-    class I2CLockGuard
-    {
-    public:
-        explicit I2CLockGuard(SemaphoreHandle_t mutex) : _mutex(mutex)
-        {
-            configASSERT(_mutex != nullptr);
-            xSemaphoreTake(_mutex, portMAX_DELAY);
-        }
-
-        ~I2CLockGuard()
-        {
-            if (_mutex != nullptr)
-                xSemaphoreGive(_mutex);
-        }
-
-    private:
-        SemaphoreHandle_t _mutex;
-    };
-} // namespace
-
-static SemaphoreHandle_t ensure_i2c_mutex(SemaphoreHandle_t &mutex)
-{
-    if (mutex == nullptr)
-    {
-        mutex = xSemaphoreCreateMutex();
-        configASSERT(mutex != nullptr);
-    }
-    return mutex;
-}
-
 // DDC (I2C) register map
 static constexpr uint8_t REG_BYTES_HI = 0xFD; // MSB of bytes available
 static constexpr uint8_t REG_BYTES_LO = 0xFE; // LSB of bytes available
@@ -57,11 +25,9 @@ static constexpr uint16_t NAV_DOP_LEN = 18;
 
 bool ZedF9P::probe()
 {
-    I2CLockGuard guard(ensure_i2c_mutex(_i2c_mutex));
-
     // Write the register address 0xFD and check the module ACKs
     uint8_t reg = REG_BYTES_HI;
-    return i2c_write_blocking(_i2c, _addr, &reg, 1, false) == 1;
+    return _i2c.write(_addr, &reg, 1, false) == 1;
 }
 
 void ZedF9P::init()
@@ -108,21 +74,17 @@ bool ZedF9P::update()
 
 void ZedF9P::onRtcmWrite(const uint8_t *data, size_t len)
 {
-    I2CLockGuard guard(ensure_i2c_mutex(_i2c_mutex));
-
     // RTCM3 bytes are written directly to the module's DDC input without a register prefix
-    i2c_write_blocking(_i2c, _addr, data, len, false);
+    _i2c.write(_addr, data, len, false);
 }
 
 uint16_t ZedF9P::available()
 {
-    I2CLockGuard guard(ensure_i2c_mutex(_i2c_mutex));
-
     uint8_t reg = REG_BYTES_HI;
     uint8_t bytes[2];
-    if (i2c_write_blocking(_i2c, _addr, &reg, 1, true) != 1)
+    if (_i2c.write(_addr, &reg, 1, true) != 1)
         return 0;
-    if (i2c_read_blocking(_i2c, _addr, bytes, 2, false) != 2)
+    if (_i2c.read(_addr, bytes, 2, false) != 2)
         return 0;
     uint16_t n = (static_cast<uint16_t>(bytes[0]) << 8) | bytes[1];
     // Module returns 0xFFFF when the output buffer is empty
@@ -131,18 +93,14 @@ uint16_t ZedF9P::available()
 
 bool ZedF9P::read_stream(uint8_t *dst, uint16_t length)
 {
-    I2CLockGuard guard(ensure_i2c_mutex(_i2c_mutex));
-
     uint8_t reg = REG_DATA;
-    if (i2c_write_blocking(_i2c, _addr, &reg, 1, true) != 1)
+    if (_i2c.write(_addr, &reg, 1, true) != 1)
         return false;
-    return i2c_read_blocking(_i2c, _addr, dst, length, false) == length;
+    return _i2c.read(_addr, dst, length, false) == length;
 }
 
 bool ZedF9P::send_ubx(uint8_t cls, uint8_t id, const uint8_t *payload, uint16_t len)
 {
-    I2CLockGuard guard(ensure_i2c_mutex(_i2c_mutex));
-
     // Maximum frame we ever send is a short config message; 128 bytes is ample
     uint8_t frame[128];
     uint16_t total = 6 + len + 2;
@@ -164,7 +122,7 @@ bool ZedF9P::send_ubx(uint8_t cls, uint8_t id, const uint8_t *payload, uint16_t 
     frame[6 + len + 1] = ck_b;
 
     // Write directly — u-blox DDC does not use a register prefix for writes
-    return i2c_write_blocking(_i2c, _addr, frame, total, false) == total;
+    return _i2c.write(_addr, frame, total, false) == total;
 }
 
 bool ZedF9P::parse(uint8_t byte)

@@ -23,7 +23,7 @@ NavData CMPS12::navigation()
     unsigned char buffer[4] = {};
     if (!read_register(0x02, buffer, 4))
     {
-        return NavData{ .cap = NAN, .pitch = 0, .roll = 0 };
+        return NavData{.cap = NAN, .pitch = 0, .roll = 0};
     }
 
     return NavData{
@@ -52,9 +52,9 @@ CalibData CMPS12::calibration()
 
 bool CMPS12::read_register(unsigned char reg, unsigned char *dst, uint length)
 {
-    if (i2c_write_blocking(_i2c, _addr, &reg, 1, true) != 1)
+    if (_i2c.write(_addr, &reg, 1, true) != 1)
         return false;
-    if (i2c_read_blocking(_i2c, _addr, dst, length, false) != length)
+    if (_i2c.read(_addr, dst, length, false) != length)
         return false;
 
     return true;

@@ -4,10 +4,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "FreeRTOS.h"
-#include "semphr.h"
-#include "hardware/i2c.h"
 #include "comms/ntrip_client.h"
+#include "comms/i2c.h"
 
 enum class RTKState : uint8_t
 {
@@ -45,7 +43,7 @@ class ZedF9P : public IRtcmSink, public IGgaSource
 public:
     static constexpr uint8_t DEFAULT_ADDR = 0x42;
 
-    ZedF9P(i2c_inst_t *i2c, uint8_t addr = DEFAULT_ADDR)
+    ZedF9P(I2C &i2c, uint8_t addr = DEFAULT_ADDR)
         : _i2c(i2c), _addr(addr) {}
 
 public:
@@ -98,9 +96,8 @@ private:
                              uint8_t &ck_a, uint8_t &ck_b);
 
 private:
-    i2c_inst_t *_i2c;
+    I2C &_i2c;
     uint8_t _addr;
-    SemaphoreHandle_t _i2c_mutex = nullptr;
     GNSSData _data{};
 
     // UBX parser state machine

@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "hardware/i2c.h"
+#include "comms/i2c.h"
 
 // --- Pins I2C ---
 
@@ -37,7 +37,7 @@ typedef struct
 class CMPS12
 {
 public:
-    CMPS12(i2c_inst_t *i2c, uint8_t addr = 0x60) : _i2c(i2c), _addr(addr) {}
+    CMPS12(I2C &i2c, uint8_t addr = 0x60) : _i2c(i2c), _addr(addr) {}
 
 public:
     RawData raw();
@@ -48,7 +48,7 @@ private:
     bool read_register(unsigned char reg, unsigned char *buffer, uint length);
 
 private:
-    i2c_inst_t *_i2c;
+    I2C &_i2c;
     uint8_t _addr;
 };
 

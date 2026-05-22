@@ -1,5 +1,5 @@
-#ifndef WIND_BLE_SERVER_H
-#define WIND_BLE_SERVER_H
+#ifndef BLE_SERVER_H
+#define BLE_SERVER_H
 
 #include <stdint.h>
 #include "btstack.h"
@@ -7,7 +7,7 @@
 #include "sensors/zed_f9p.h"
 
 /**
- * wind_ble_server.h
+ * ble_server.h
  *
  * BLE GATT Peripheral that restreams Calypso anemometer data and Zed F9P
  * location data using standard Bluetooth SIG services.
@@ -37,4 +37,4 @@ public:
     void updateLocation(const GNSSData *data);
 };
 
-#endif // WIND_BLE_SERVER_H
+#endif // BLE_SERVER_H
