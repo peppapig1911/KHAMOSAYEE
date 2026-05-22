@@ -27,7 +27,6 @@ CalypsoAnemometer::CalypsoAnemometer()
       target_addr_type_(BD_ADDR_TYPE_LE_PUBLIC),
       connection_handle_(HCI_CON_HANDLE_INVALID),
       latest_data_{},
-      user_callback_(nullptr),
       service_{},
       measurement_char_{},
       notification_listener_{},
@@ -37,13 +36,12 @@ CalypsoAnemometer::CalypsoAnemometer()
 {
 }
 
-void CalypsoAnemometer::init(const char *mac_address, uint8_t addr_type, DataCallback callback)
+void CalypsoAnemometer::init(const char *mac_address, uint8_t addr_type)
 {
     instance_ = this;
 
     parseMacAddress(mac_address, target_addr_);
     target_addr_type_ = static_cast<bd_addr_type_t>(addr_type);
-    user_callback_ = callback;
     state_ = State::IDLE;
     connection_handle_ = HCI_CON_HANDLE_INVALID;
     notification_registered_ = false;
@@ -322,10 +320,7 @@ void CalypsoAnemometer::parseMeasurement(const uint8_t *data, uint16_t length)
 
     latest_data_.wind_speed = speed_raw / 100.0f;
     latest_data_.wind_direction = static_cast<float>(dir_raw);
-    latest_data_.battery = (batt_raw * 10) / 100.0f;
-
-    if (user_callback_)
-        user_callback_(&latest_data_);
+    latest_data_.battery = (batt_raw * 100.0f) / 100.0f;
 }
 
 void CalypsoAnemometer::parseMacAddress(const char *str, bd_addr_t addr)

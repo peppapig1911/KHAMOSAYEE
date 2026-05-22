@@ -12,17 +12,15 @@ struct CalypsoData
 {
     float wind_speed;     // m/s
     float wind_direction; // degrees
-    float battery;        // volts
+    float battery;        // percentage (0-100)
 };
 
 class CalypsoAnemometer
 {
 public:
-    using DataCallback = void (*)(const CalypsoData *);
-
     CalypsoAnemometer();
 
-    void init(const char *mac_address, uint8_t addr_type, DataCallback callback);
+    void init(const char *mac_address, uint8_t addr_type);
     void connect();
     void disconnect();
     CalypsoData getData() const;
@@ -50,7 +48,6 @@ private:
     bd_addr_type_t target_addr_type_;
     hci_con_handle_t connection_handle_;
     CalypsoData latest_data_;
-    DataCallback user_callback_;
     gatt_client_service_t service_;
     gatt_client_characteristic_t measurement_char_;
     gatt_client_notification_t notification_listener_;

@@ -41,7 +41,7 @@ static void on_wind_data(const CalypsoData *data)
 {
     last_known_wind = data->wind_direction;
     sail_set_angle_from_wind(data->wind_direction);
-    LOGD(MODULE, "Wind speed: %.2f m/s | direction: %.1f deg | battery: %.2f V", data->wind_speed, data->wind_direction, data->battery);
+    LOGD(MODULE, "Wind speed: %.2f m/s | direction: %.1f deg | battery: %.2f\%", data->wind_speed, data->wind_direction, data->battery);
     ble_server.update(data);
 }
 
@@ -160,7 +160,7 @@ static void wifi_init_task(void *param)
     LOGI(MODULE, "WiFi connected successfully");
 
     ble_server.init();
-    calypso.init("F9:26:B6:C0:42:F3", 1, on_wind_data);
+    calypso.init("F9:26:B6:C0:42:F3", 1);
     ble_server.startAdvertising();
     calypso.connect();
 
