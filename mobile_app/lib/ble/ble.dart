@@ -4,42 +4,16 @@ import 'dart:typed_data';
 
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
-/// Parsed values coming from the BLE wind peripheral.
-class WindGattData {
-  const WindGattData({
-    required this.windSpeedMs,
-    required this.windDirectionDeg,
-    required this.batteryPercent,
-    required this.receivedAt,
-  });
-
-  /// Apparent wind speed in m/s (source unit is 0.01 m/s).
-  final double? windSpeedMs;
-
-  /// Apparent wind direction in degrees (source unit is 0.01 degrees).
-  final double? windDirectionDeg;
-
-  /// Battery level in percent (0-100).
-  final int? batteryPercent;
-
-  final DateTime receivedAt;
-
-  WindGattData copyWith({
-    double? windSpeedMs,
-    double? windDirectionDeg,
-    int? batteryPercent,
-    DateTime? receivedAt,
-  }) {
-    return WindGattData(
-      windSpeedMs: windSpeedMs ?? this.windSpeedMs,
-      windDirectionDeg: windDirectionDeg ?? this.windDirectionDeg,
-      batteryPercent: batteryPercent ?? this.batteryPercent,
-      receivedAt: receivedAt ?? this.receivedAt,
-    );
-  }
-}
+import 'data.dart';
 
 enum BleConnectionState { idle, scanning, connecting, connected, disconnected, error }
+
+class BleData {
+  final WindGattData wind;
+  final GPSData gps;
+
+  BleData({required this.wind, required this.gps});
+}
 
 /// BLE manager for scanning, connecting and consuming wind GATT data.
 class WindBleClient {
@@ -49,33 +23,68 @@ class WindBleClient {
   static final Guid apparentWindSpeedChar = Guid('00002A72-0000-1000-8000-00805F9B34FB');
   static final Guid apparentWindDirectionChar = Guid('00002A73-0000-1000-8000-00805F9B34FB');
   static final Guid batteryLevelChar = Guid('00002A19-0000-1000-8000-00805F9B34FB');
+  static final Guid latitudeChar = Guid('00002A69-0000-1000-8000-00805F9B34FB');
+  static final Guid longitudeChar = Guid('00002A6A-0000-1000-8000-00805F9B34FB');
+  static final Guid altitudeChar = Guid('00002A6B-0000-1000-8000-00805F9B34FB');
 
   final _stateController = StreamController<BleConnectionState>.broadcast();
-  final _dataController = StreamController<WindGattData>.broadcast();
+  final _dataController = StreamController<BleData>.broadcast();
   final _errorController = StreamController<String>.broadcast();
 
   Stream<BleConnectionState> get stateStream => _stateController.stream;
-  Stream<WindGattData> get dataStream => _dataController.stream;
+  Stream<BleData> get dataStream => _dataController.stream;
   Stream<String> get errorStream => _errorController.stream;
 
   BluetoothDevice? _device;
   BluetoothCharacteristic? _windSpeedCharacteristic;
   BluetoothCharacteristic? _windDirectionCharacteristic;
   BluetoothCharacteristic? _batteryCharacteristic;
+  BluetoothCharacteristic? _latitudeCharacteristic;
+  BluetoothCharacteristic? _longitudeCharacteristic;
+  BluetoothCharacteristic? _altitudeCharacteristic;
 
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothConnectionState>? _deviceStateSub;
   final List<StreamSubscription<List<int>>> _notifySubs = <StreamSubscription<List<int>>>[];
 
-  WindGattData _latest = WindGattData(
+  WindGattData _latestWindData = WindGattData(
     windSpeedMs: null,
     windDirectionDeg: null,
     batteryPercent: null,
-    receivedAt: DateTime.now(),
+    timestamp: DateTime.now(),
+  );
+
+  GPSData _latestGpsData = GPSData(
+    latitude: 0.0,
+    longitude: 0.0,
+    altitudeM: 0.0,
+    accuracyM: 0.0,
+    timestamp: DateTime.now(),
   );
 
   bool get isConnected => _device != null;
   BluetoothDevice? get device => _device;
+
+  Stream<List<ScanResult>> get scanResults => FlutterBluePlus.scanResults;
+
+  Future<void> startScanning({Duration timeout = const Duration(seconds: 15)}) async {
+    _emitState(BleConnectionState.scanning);
+    try {
+      await FlutterBluePlus.startScan(timeout: timeout);
+    } catch (e) {
+      _emitError('Failed to start scan: $e');
+      _emitState(BleConnectionState.error);
+    }
+  }
+
+  Future<void> stopScanning() async {
+    try {
+      await FlutterBluePlus.stopScan();
+    } catch (e) {
+      _emitError('Failed to stop scan: $e');
+    }
+    _emitState(BleConnectionState.idle);
+  }
 
   Future<void> startScanAndConnect({
     String? deviceId,
@@ -164,6 +173,9 @@ class WindBleClient {
     _windSpeedCharacteristic = null;
     _windDirectionCharacteristic = null;
     _batteryCharacteristic = null;
+    _latitudeCharacteristic = null;
+    _longitudeCharacteristic = null;
+    _altitudeCharacteristic = null;
     _emitState(BleConnectionState.idle);
   }
 
@@ -189,6 +201,12 @@ class WindBleClient {
           _windDirectionCharacteristic = c;
         } else if (c.uuid == batteryLevelChar) {
           _batteryCharacteristic = c;
+        } else if (c.uuid == latitudeChar) {
+          _latitudeCharacteristic = c;
+        } else if (c.uuid == longitudeChar) {
+          _longitudeCharacteristic = c;
+        } else if (c.uuid == altitudeChar) {
+          _altitudeCharacteristic = c;
         }
       }
     }
@@ -203,8 +221,11 @@ class WindBleClient {
         final raw = _readUint16LittleEndian(value);
         if (raw == null) return;
 
-        _latest = _latest.copyWith(windSpeedMs: raw / 100.0, receivedAt: DateTime.now());
-        _dataController.add(_latest);
+        _latestWindData = _latestWindData.copyWith(
+          windSpeedMs: raw / 100.0,
+          timestamp: DateTime.now(),
+        );
+        _dataController.add(BleData(wind: _latestWindData, gps: _latestGpsData));
       },
     );
 
@@ -214,8 +235,11 @@ class WindBleClient {
         final raw = _readUint16LittleEndian(value);
         if (raw == null) return;
 
-        _latest = _latest.copyWith(windDirectionDeg: raw / 100.0, receivedAt: DateTime.now());
-        _dataController.add(_latest);
+        _latestWindData = _latestWindData.copyWith(
+          windDirectionDeg: raw / 100.0,
+          timestamp: DateTime.now(),
+        );
+        _dataController.add(BleData(wind: _latestWindData, gps: _latestGpsData));
       },
     );
 
@@ -225,8 +249,55 @@ class WindBleClient {
         onData: (value) {
           if (value.isEmpty) return;
 
-          _latest = _latest.copyWith(batteryPercent: value.first, receivedAt: DateTime.now());
-          _dataController.add(_latest);
+          _latestWindData = _latestWindData.copyWith(
+            batteryPercent: value.first,
+            timestamp: DateTime.now(),
+          );
+          _dataController.add(BleData(wind: _latestWindData, gps: _latestGpsData));
+        },
+      );
+    }
+
+    if (_latitudeCharacteristic != null) {
+      await _subscribeCharacteristic(
+        _latitudeCharacteristic!,
+        onData: (value) {
+          final raw = _readInt32LittleEndian(value);
+          if (raw == null) return;
+
+          final latitude = raw * 1e-7;
+          _latestGpsData = _latestGpsData.copyWith(latitude: latitude, timestamp: DateTime.now());
+          _dataController.add(BleData(wind: _latestWindData, gps: _latestGpsData));
+        },
+      );
+    }
+
+    if (_longitudeCharacteristic != null) {
+      await _subscribeCharacteristic(
+        _longitudeCharacteristic!,
+        onData: (value) {
+          final raw = _readInt32LittleEndian(value);
+          if (raw == null) return;
+
+          final longitude = raw * 1e-7;
+          _latestGpsData = _latestGpsData.copyWith(longitude: longitude, timestamp: DateTime.now());
+          _dataController.add(BleData(wind: _latestWindData, gps: _latestGpsData));
+        },
+      );
+    }
+
+    if (_altitudeCharacteristic != null) {
+      await _subscribeCharacteristic(
+        _altitudeCharacteristic!,
+        onData: (value) {
+          final raw = _readInt32LittleEndian(value);
+          if (raw == null) return;
+
+          _latestGpsData = _latestGpsData.copyWith(
+            altitudeM: raw / 1000.0,
+            timestamp: DateTime.now(),
+          );
+          _dataController.add(BleData(wind: _latestWindData, gps: _latestGpsData));
         },
       );
     }
@@ -260,6 +331,15 @@ class WindBleClient {
 
     final bytes = Uint8List.fromList(value.sublist(0, 2));
     return ByteData.sublistView(bytes).getUint16(0, Endian.little);
+  }
+
+  int? _readInt32LittleEndian(List<int> value) {
+    if (value.length < 4) {
+      return null;
+    }
+
+    final bytes = Uint8List.fromList(value.sublist(0, 4));
+    return ByteData.sublistView(bytes).getInt32(0, Endian.little);
   }
 
   void _emitState(BleConnectionState state) {

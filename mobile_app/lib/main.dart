@@ -4,9 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
-import 'ble.dart';
-import 'widgets/ble_bottom_drawer.dart';
+import 'ble/ble.dart';
+import 'widgets/wind_data_card.dart';
+import 'widgets/map_view.dart';
+import 'widgets/location_overlay.dart';
+import 'widgets/ble_device_selection.dart';
 
 void main() {
   runApp(const MyApp());
@@ -33,21 +37,20 @@ class MapBlePage extends StatefulWidget {
 }
 
 class _MapBlePageState extends State<MapBlePage> {
-  static final LatLng _defaultCenter = LatLng(0.0, 0.0);
-  static const double _drawerCollapsedHeight = 76;
-  static const double _drawerExpandedHeight = 230;
-
   LatLng? _userPosition;
+  final List<LatLng> _userTrail = <LatLng>[];
+  final List<LatLng> _bleTrail = <LatLng>[];
+  LatLng _mapCenter = LatLng(0.0, 0.0);
+  double _mapZoom = 12.0;
   String? _locationError;
   bool _isLocating = false;
-  bool _isDrawerExpanded = true;
 
   final WindBleClient _bleClient = WindBleClient();
   StreamSubscription<BleConnectionState>? _bleStateSub;
-  StreamSubscription<WindGattData>? _bleDataSub;
+  StreamSubscription<BleData>? _bleDataSub;
   StreamSubscription<String>? _bleErrorSub;
   BleConnectionState _bleState = BleConnectionState.idle;
-  WindGattData? _windData;
+  BleData? _data;
   String? _bleError;
   final MapController _mapController = MapController();
 
@@ -69,8 +72,13 @@ class _MapBlePageState extends State<MapBlePage> {
     _bleDataSub = _bleClient.dataStream.listen((data) {
       if (!mounted) return;
       setState(() {
-        _windData = data;
+        _data = data;
         _bleError = null;
+        var lat = data.gps.latitude;
+        var lng = data.gps.longitude;
+        if (lat != 0 && lng != 0) {
+          _appendTrailPoint(_bleTrail, LatLng(lat, lng));
+        }
       });
     });
 
@@ -80,12 +88,6 @@ class _MapBlePageState extends State<MapBlePage> {
         _bleError = message;
       });
     });
-
-    unawaited(_scanAndConnect());
-  }
-
-  Future<void> _scanAndConnect() async {
-    await _bleClient.startScanAndConnect(deviceId: "2C:CF:67:09:0F:C4");
   }
 
   Future<void> _initializeLocation() async {
@@ -141,7 +143,11 @@ class _MapBlePageState extends State<MapBlePage> {
 
       setState(() {
         _userPosition = target;
+        _appendTrailPoint(_userTrail, target);
         _isLocating = false;
+        if (moveMap) {
+          _mapCenter = target;
+        }
       });
 
       if (moveMap) {
@@ -155,8 +161,12 @@ class _MapBlePageState extends State<MapBlePage> {
         final target = LatLng(lastKnown.latitude, lastKnown.longitude);
         setState(() {
           _userPosition = target;
+          _appendTrailPoint(_userTrail, target);
           _isLocating = false;
           _locationError = 'Using last known location.';
+          if (moveMap) {
+            _mapCenter = target;
+          }
         });
         if (moveMap) {
           _mapController.move(target, _mapController.zoom);
@@ -190,6 +200,27 @@ class _MapBlePageState extends State<MapBlePage> {
     _mapController.move(point, _mapController.zoom);
   }
 
+  void _onMapMoved((LatLng, double) camera) {
+    setState(() {
+      _mapCenter = camera.$1;
+      _mapZoom = camera.$2;
+    });
+  }
+
+  void _appendTrailPoint(List<LatLng> trail, LatLng point) {
+    if (trail.isNotEmpty) {
+      final lastPoint = trail.last;
+      if (lastPoint.latitude == point.latitude && lastPoint.longitude == point.longitude) {
+        return;
+      }
+    }
+
+    trail.add(point);
+    if (trail.length > 300) {
+      trail.removeAt(0);
+    }
+  }
+
   Future<void> _recenterToUserPosition() async {
     await _refreshUserLocation(moveMap: true);
     if (_userPosition != null && mounted) {
@@ -199,97 +230,105 @@ class _MapBlePageState extends State<MapBlePage> {
 
   @override
   Widget build(BuildContext context) {
+    // Show device selection page if not connected
+    if (!_bleClient.isConnected) {
+      return BleDeviceSelectionPage(
+        bleClient: _bleClient,
+        onDeviceSelected: _connectToSelectedDevice,
+      );
+    }
+
+    final deviceName = _bleClient.device?.platformName ?? 'Not Connected';
+    final deviceId = _bleClient.device?.remoteId.str ?? 'Unknown';
+    final bleStatus = switch (_bleState) {
+      BleConnectionState.scanning => 'Scanning',
+      BleConnectionState.connecting => 'Connecting',
+      BleConnectionState.connected => 'Connected',
+      BleConnectionState.disconnected => 'Disconnected',
+      BleConnectionState.error => 'Error',
+      BleConnectionState.idle => 'Idle',
+    };
+
     return Scaffold(
+      backgroundColor: Colors.grey[100],
       appBar: AppBar(
-        title: const Text('KHAMOSAYEE Map & BLE'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-      ),
-      bottomSheet: BleBottomDrawer(
-        isExpanded: _isDrawerExpanded,
-        bleState: _bleState,
-        windData: _windData,
-        bleError: _bleError,
-        isLocating: _isLocating,
-        onToggleExpanded: () => setState(() {
-          _isDrawerExpanded = !_isDrawerExpanded;
-        }),
-        onReconnect: _scanAndConnect,
+        elevation: 0,
+        backgroundColor: const Color(0xFF5ECCC0),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Calypso Anemometer',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            Text(
+              '$deviceName · $deviceId',
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
+            ),
+            Text(bleStatus, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500)),
+          ],
+        ),
       ),
       body: Stack(
         children: [
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              center: _userPosition ?? _defaultCenter,
-              zoom: 12.0,
-              onTap: _onMapTap,
-            ),
+          Column(
             children: [
-              TileLayer(
-                urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.example.khamosayee_map_ble',
-                subdomains: const ['a', 'b', 'c'],
-              ),
-              MarkerLayer(
-                markers: [
-                  if (_userPosition != null)
-                    Marker(
-                      width: 40.0,
-                      height: 40.0,
-                      point: _userPosition!,
-                      builder: (context) =>
-                          const Icon(Icons.location_on, color: Colors.red, size: 40),
-                    ),
-                ],
+              WindDataCardsSection(windData: _data?.wind),
+              MapViewWidget(
+                mapController: _mapController,
+                userPosition: _userPosition,
+                blePosition: LatLng(_data!.gps.latitude, _data!.gps.longitude),
+                userTrail: _userTrail,
+                bleTrail: _bleTrail,
+                center: _mapCenter,
+                zoom: _mapZoom,
+                onMapTap: _onMapTap,
+                onMapMoved: _onMapMoved,
               ),
             ],
           ),
-          if (_userPosition != null)
+          if (_bleError != null)
             Positioned(
-              top: 16,
-              left: 16,
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                color: Colors.black54,
-                child: Text(
-                  'User position: ${_userPosition!.latitude.toStringAsFixed(6)}, ${_userPosition!.longitude.toStringAsFixed(6)}',
-                  style: const TextStyle(color: Colors.white),
+              top: 12,
+              left: 12,
+              right: 12,
+              child: SafeArea(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.black87,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    _bleError!,
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                  ),
                 ),
               ),
             ),
-          if (_locationError != null)
-            Positioned(
-              top: _userPosition != null ? 76 : 16,
-              left: 16,
-              right: 16,
-              child: Container(
-                padding: const EdgeInsets.all(10),
-                color: Colors.black54,
-                child: Text(_locationError!, style: const TextStyle(color: Colors.orangeAccent)),
-              ),
-            ),
-          Positioned(
-            bottom: _isDrawerExpanded ? _drawerExpandedHeight + 16 : _drawerCollapsedHeight + 16,
-            right: 16,
-            child: FloatingActionButton(
-              backgroundColor: Colors.black54,
-              foregroundColor: Colors.white,
-              mini: true,
-              onPressed: _isLocating ? null : _recenterToUserPosition,
-              child: _isLocating
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    )
-                  : const Icon(Icons.my_location),
-            ),
+          LocationOverlay(
+            userPosition: _userPosition,
+            locationError: _locationError,
+            isLocating: _isLocating,
+            onRecenter: _recenterToUserPosition,
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _connectToSelectedDevice(BluetoothDevice device) async {
+    try {
+      await _bleClient.connect(device);
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to connect: $e')));
+      }
+    }
   }
 }
