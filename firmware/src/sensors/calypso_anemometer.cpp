@@ -18,6 +18,8 @@
 #include "pico/cyw43_arch.h"
 #include "log.h"
 
+static constexpr const char *MODULE = "Calypso";
+
 CalypsoAnemometer *CalypsoAnemometer::instance_ = nullptr;
 
 CalypsoAnemometer::CalypsoAnemometer()
@@ -52,7 +54,7 @@ void CalypsoAnemometer::init(const char *mac_address, uint8_t addr_type, DataCal
 
     gatt_client_init();
 
-    LOGI("Calypso", "Initialized. Target: %s (type: %s)",
+    LOGI(MODULE, "Initialized. Target: %s (type: %s)",
          mac_address,
          addr_type == 1 ? "random" : "public");
 }
@@ -61,16 +63,20 @@ void CalypsoAnemometer::connect()
 {
     if (state_ == State::CONNECTING || state_ == State::SUBSCRIBED)
     {
-        LOGD("Calypso", "Already connecting or connected.");
         return;
     }
 
     state_ = State::CONNECTING;
-    LOGI("Calypso", "Connecting to %02X:%02X:%02X:%02X:%02X:%02X...",
+    LOGI(MODULE, "Connecting to %02X:%02X:%02X:%02X:%02X:%02X...",
          target_addr_[0], target_addr_[1], target_addr_[2],
          target_addr_[3], target_addr_[4], target_addr_[5]);
 
-    gap_connect(target_addr_, target_addr_type_);
+    auto ret = gap_connect(target_addr_, target_addr_type_);
+    if (ret)
+    {
+        LOGE(MODULE, "gap_connect failed: 0x%02X", ret);
+        state_ = State::IDLE;
+    }
 }
 
 void CalypsoAnemometer::disconnect()
@@ -120,15 +126,16 @@ void CalypsoAnemometer::reconnectTimerHandlerS(btstack_timer_source_t *ts)
 void CalypsoAnemometer::notificationHandler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size)
 {
     UNUSED(channel);
-    UNUSED(size);
 
     if (packet_type != HCI_EVENT_PACKET)
         return;
+
     if (hci_event_packet_get_type(packet) != GATT_EVENT_NOTIFICATION)
         return;
 
     uint16_t value_length = gatt_event_notification_get_value_length(packet);
     const uint8_t *value = gatt_event_notification_get_value(packet);
+
     parseMeasurement(value, value_length);
 }
 
@@ -150,18 +157,16 @@ void CalypsoAnemometer::gattEventHandler(uint8_t packet_type, uint16_t channel, 
         {
         case GATT_EVENT_SERVICE_QUERY_RESULT:
             gatt_event_service_query_result_get_service(packet, &service_);
-            LOGD("Calypso", "Found service 0x%04X", SERVICE_UUID);
             break;
 
         case GATT_EVENT_QUERY_COMPLETE:
             att_status = gatt_event_query_complete_get_att_status(packet);
             if (att_status != ATT_ERROR_SUCCESS)
             {
-                LOGE("Calypso", "Service discovery failed: 0x%02X", att_status);
+                LOGE(MODULE, "Service discovery failed: 0x%02X", att_status);
                 disconnect();
                 return;
             }
-            LOGI("Calypso", "Discovering characteristics...");
             state_ = State::DISCOVERING_CHARACTERISTICS;
             gatt_client_discover_characteristics_for_service_by_uuid16(
                 gattEventHandlerS, connection_handle_, &service_, MEASUREMENT_UUID);
@@ -177,15 +182,13 @@ void CalypsoAnemometer::gattEventHandler(uint8_t packet_type, uint16_t channel, 
         {
         case GATT_EVENT_CHARACTERISTIC_QUERY_RESULT:
             gatt_event_characteristic_query_result_get_characteristic(packet, &measurement_char_);
-            LOGD("Calypso", "Found measurement characteristic 0x%04X (handle: 0x%04X)",
-                 MEASUREMENT_UUID, measurement_char_.value_handle);
             break;
 
         case GATT_EVENT_QUERY_COMPLETE:
             att_status = gatt_event_query_complete_get_att_status(packet);
             if (att_status != ATT_ERROR_SUCCESS)
             {
-                LOGE("Calypso", "Characteristic discovery failed: 0x%02X", att_status);
+                LOGE(MODULE, "Characteristic discovery failed: 0x%02X", att_status);
                 disconnect();
                 return;
             }
@@ -198,7 +201,6 @@ void CalypsoAnemometer::gattEventHandler(uint8_t packet_type, uint16_t channel, 
                 notification_registered_ = true;
             }
 
-            LOGI("Calypso", "Enabling notifications...");
             state_ = State::ENABLING_NOTIFICATIONS;
             gatt_client_write_client_characteristic_configuration(
                 gattEventHandlerS, connection_handle_, &measurement_char_,
@@ -216,12 +218,12 @@ void CalypsoAnemometer::gattEventHandler(uint8_t packet_type, uint16_t channel, 
             att_status = gatt_event_query_complete_get_att_status(packet);
             if (att_status != ATT_ERROR_SUCCESS)
             {
-                LOGE("Calypso", "Enable notifications failed: 0x%02X", att_status);
+                LOGE(MODULE, "Enable notifications failed: 0x%02X", att_status);
                 disconnect();
                 return;
             }
             state_ = State::SUBSCRIBED;
-            LOGI("Calypso", "Subscribed to notifications. Receiving data.");
+            LOGI(MODULE, "Subscribed to notifications. Receiving data.");
         }
         break;
 
@@ -246,17 +248,31 @@ void CalypsoAnemometer::hciEventHandler(uint8_t packet_type, uint16_t channel, u
             break;
 
         uint8_t status = hci_subevent_le_connection_complete_get_status(packet);
+
         if (status != ERROR_CODE_SUCCESS)
         {
-            LOGE("Calypso", "Connection failed: 0x%02X", status);
+            LOGE(MODULE, "Connection failed: 0x%02X", status);
             state_ = State::DISCONNECTED;
             scheduleReconnect();
             return;
         }
-        connection_handle_ = hci_subevent_le_connection_complete_get_connection_handle(packet);
-        LOGI("Calypso", "Connected! (handle: 0x%04X)", connection_handle_);
 
-        LOGI("Calypso", "Discovering services...");
+        if (state_ != State::CONNECTING)
+            break;
+
+        if (hci_subevent_le_connection_complete_get_role(packet) != 0)
+            break;
+
+        bd_addr_t peer_addr;
+        hci_subevent_le_connection_complete_get_peer_address(packet, peer_addr);
+        if (memcmp(peer_addr, target_addr_, sizeof(peer_addr)) != 0)
+            break;
+
+        connection_handle_ = hci_subevent_le_connection_complete_get_connection_handle(packet);
+        LOGI(MODULE, "Connected! (handle: 0x%04X)", connection_handle_);
+
+        LOGI(MODULE, "Discovering services...");
+        state_ = State::CONNECTED;
         state_ = State::DISCOVERING_SERVICES;
         gatt_client_discover_primary_services_by_uuid16(
             gattEventHandlerS, connection_handle_, SERVICE_UUID);
@@ -264,9 +280,13 @@ void CalypsoAnemometer::hciEventHandler(uint8_t packet_type, uint16_t channel, u
     }
 
     case HCI_EVENT_DISCONNECTION_COMPLETE:
-        if (state_ == State::IDLE)
+        if (connection_handle_ == HCI_CON_HANDLE_INVALID)
             break;
-        LOGI("Calypso", "Disconnected.");
+
+        if (hci_event_disconnection_complete_get_connection_handle(packet) != connection_handle_)
+            break;
+
+        LOGI(MODULE, "Disconnected.");
         notification_registered_ = false;
         state_ = State::DISCONNECTED;
         connection_handle_ = HCI_CON_HANDLE_INVALID;
@@ -275,7 +295,7 @@ void CalypsoAnemometer::hciEventHandler(uint8_t packet_type, uint16_t channel, u
 
     case BTSTACK_EVENT_STATE:
         if (btstack_event_state_get_state(packet) == HCI_STATE_WORKING)
-            LOGD("Calypso", "BTstack ready.");
+            LOGI(MODULE, "BTstack ready.");
         break;
 
     default:
@@ -285,7 +305,7 @@ void CalypsoAnemometer::hciEventHandler(uint8_t packet_type, uint16_t channel, u
 
 void CalypsoAnemometer::scheduleReconnect()
 {
-    LOGI("Calypso", "Will reconnect in %lu ms", RECONNECT_DELAY_MS);
+    LOGI(MODULE, "Will reconnect in %lu ms", RECONNECT_DELAY_MS);
     btstack_run_loop_set_timer(&reconnect_timer_, RECONNECT_DELAY_MS);
     btstack_run_loop_set_timer_handler(&reconnect_timer_, reconnectTimerHandlerS);
     btstack_run_loop_add_timer(&reconnect_timer_);
@@ -293,7 +313,7 @@ void CalypsoAnemometer::scheduleReconnect()
 
 void CalypsoAnemometer::parseMeasurement(const uint8_t *data, uint16_t length)
 {
-    if (length < 10)
+    if (length < 5)
         return;
 
     uint16_t speed_raw = data[0] | (data[1] << 8);

@@ -1,0 +1,28 @@
+# Build artifacts
+build/
+firmware/build/
+*.o
+*.a
+*.so
+*.elf
+*.uf2
+*.dis
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# CMake
+CMakeUserPresets.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo

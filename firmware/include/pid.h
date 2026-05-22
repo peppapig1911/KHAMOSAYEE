@@ -11,4 +11,5 @@ public:
 private:
     float _kP, _kI, _kD, _integral_max;
     float _prev_error = 0, _integral = 0;
+    bool _has_prev_error = false;
 };
