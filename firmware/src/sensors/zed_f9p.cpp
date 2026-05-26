@@ -82,9 +82,7 @@ uint16_t ZedF9P::available()
 {
     uint8_t reg = REG_BYTES_HI;
     uint8_t bytes[2];
-    if (_i2c.write(_addr, &reg, 1, true) != 1)
-        return 0;
-    if (_i2c.read(_addr, bytes, 2, false) != 2)
+    if (_i2c.write_read(_addr, &reg, 1, bytes, 2) != 2)
         return 0;
     uint16_t n = (static_cast<uint16_t>(bytes[0]) << 8) | bytes[1];
     // Module returns 0xFFFF when the output buffer is empty
@@ -94,9 +92,7 @@ uint16_t ZedF9P::available()
 bool ZedF9P::read_stream(uint8_t *dst, uint16_t length)
 {
     uint8_t reg = REG_DATA;
-    if (_i2c.write(_addr, &reg, 1, true) != 1)
-        return false;
-    return _i2c.read(_addr, dst, length, false) == length;
+    return _i2c.write_read(_addr, &reg, 1, dst, length) == (int)length;
 }
 
 bool ZedF9P::send_ubx(uint8_t cls, uint8_t id, const uint8_t *payload, uint16_t len)
