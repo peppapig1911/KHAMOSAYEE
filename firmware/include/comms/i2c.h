@@ -36,6 +36,13 @@ public:
     /// Returns the number of bytes written on success, -1 on failure (e.g. NACK or timeout).
     int write(uint8_t addr, const uint8_t *src, size_t len, bool nostop = false);
 
+    /// Atomic register-read transaction: write `wlen` bytes with a repeated start
+    /// (no stop), then read `rlen` bytes. The bus mutex is held across both
+    /// phases so another task cannot interleave a transaction between them and
+    /// corrupt the slave's register pointer or the bus state.
+    /// Returns `rlen` on success, -1 on failure.
+    int write_read(uint8_t addr, const uint8_t *wsrc, size_t wlen, uint8_t *rdst, size_t rlen);
+
 private:
     uint _baudrate;
     uint _sda, _scl;
