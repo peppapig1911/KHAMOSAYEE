@@ -10,6 +10,7 @@
  *     ├── Longitude               0x2A6A  READ | NOTIFY
  *     └── Altitude                0x2A6B  READ | NOTIFY
  *     └── Heading                 0xFFF5  READ | NOTIFY
+ *     └── GPS Accuracy            0xFFF6  READ | NOTIFY
  *   Manual Control Service 0xFFF0
  *     ├── Control Mode             0xFFF1  READ | WRITE
  *     ├── Front Wheel Offset       0xFFF2  READ | WRITE
@@ -78,6 +79,7 @@ static int32_t current_latitude_raw = 0;        // 1e-7 degrees
 static int32_t current_longitude_raw = 0;       // 1e-7 degrees
 static int32_t current_altitude_raw = 0;        // millimeters
 static uint16_t current_heading_raw = 0;        // 0.01 degrees
+static uint16_t current_accuracy_raw = 0;       // 0.01 meters
 static uint8_t current_control_mode = 0;        // 0 = auto, 1 = manual
 static uint8_t current_front_wheel_offset = 0;  // 0-100
 static uint8_t current_sail_opening_pct = 0;    // 0-100
@@ -140,6 +142,10 @@ static uint16_t att_read_callback(hci_con_handle_t connection_handle,
     if (att_handle == ATT_CHARACTERISTIC_0xFFF5_01_VALUE_HANDLE)
         return att_read_callback_handle_little_endian_16(
             current_heading_raw, offset, buffer, buffer_size);
+
+    if (att_handle == ATT_CHARACTERISTIC_0xFFF6_01_VALUE_HANDLE)
+        return att_read_callback_handle_little_endian_16(
+            current_accuracy_raw, offset, buffer, buffer_size);
 
     if (att_handle == ATT_CHARACTERISTIC_0xFFF1_01_VALUE_HANDLE)
         return att_read_callback_handle_byte(current_control_mode, offset, buffer, buffer_size);
@@ -340,6 +346,9 @@ void BleServer::updateLocation(const GNSSData *data)
     current_latitude_raw = static_cast<int32_t>(data->lat * 10000000.0);
     current_longitude_raw = static_cast<int32_t>(data->lon * 10000000.0);
     current_altitude_raw = static_cast<int32_t>(data->altitude * 1000.0f);
+    const float accuracy_m = data->h_acc;
+    const float clamped_accuracy_m = accuracy_m < 0.0f ? 0.0f : (accuracy_m > 655.35f ? 655.35f : accuracy_m);
+    current_accuracy_raw = static_cast<uint16_t>(clamped_accuracy_m * 100.0f);
 
     if (con_handle == HCI_CON_HANDLE_INVALID)
         return;
@@ -357,6 +366,10 @@ void BleServer::updateLocation(const GNSSData *data)
     att_server_notify(con_handle,
                       ATT_CHARACTERISTIC_0x2A6B_01_VALUE_HANDLE,
                       reinterpret_cast<uint8_t *>(&current_altitude_raw), 4);
+
+    att_server_notify(con_handle,
+                      ATT_CHARACTERISTIC_0xFFF6_01_VALUE_HANDLE,
+                      reinterpret_cast<uint8_t *>(&current_accuracy_raw), 2);
 }
 
 void BleServer::updateHeading(float heading_deg)

@@ -40,6 +40,9 @@ CHARACTERISTIC, 0x2A6B, READ | NOTIFY | DYNAMIC,
 // Heading (0..359.99 degrees)
 CHARACTERISTIC, 0xFFF5, READ | NOTIFY | DYNAMIC,
 
+// GPS accuracy (horizontal, 0.01 m)
+CHARACTERISTIC, 0xFFF6, READ | NOTIFY | DYNAMIC,
+
 // === Manual Control Service (0xFFF0) ===
 PRIMARY_SERVICE, 0xFFF0
 

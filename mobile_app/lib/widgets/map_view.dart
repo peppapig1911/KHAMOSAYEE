@@ -8,6 +8,7 @@ import 'package:latlong2/latlong.dart';
 class MapViewWidget extends StatelessWidget {
   final MapController mapController;
   final LatLng? userPosition;
+  final double? userHeadingDeg;
   final LatLng? blePosition;
   final double? headingDeg;
   final LatLng? targetPosition;
@@ -16,12 +17,13 @@ class MapViewWidget extends StatelessWidget {
   final LatLng center;
   final double zoom;
   final Function(TapPosition, LatLng) onMapTap;
-  final ValueChanged<(LatLng, double)> onMapMoved;
+  final ValueChanged<(LatLng, double, bool)> onMapMoved;
 
   const MapViewWidget({
     super.key,
     required this.mapController,
     required this.userPosition,
+    required this.userHeadingDeg,
     required this.blePosition,
     required this.headingDeg,
     required this.targetPosition,
@@ -35,74 +37,87 @@ class MapViewWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: FlutterMap(
-        mapController: mapController,
-        options: MapOptions(
-          center: center,
-          zoom: zoom,
+    return FlutterMap(
+      mapController: mapController,
+      options: MapOptions(
+        center: center,
+        zoom: zoom,
+        minZoom: 3.0,
+        maxZoom: 19.0,
+        onTap: onMapTap,
+        onPositionChanged: (position, hasGesture) {
+          if (position.center != null) {
+            onMapMoved((position.center!, position.zoom ?? zoom, hasGesture));
+          }
+        },
+      ),
+      children: [
+        TileLayer(
+          urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+          userAgentPackageName: 'com.example.khamosayee_map_ble',
           minZoom: 3.0,
           maxZoom: 19.0,
-          onTap: onMapTap,
-          onPositionChanged: (position, hasGesture) {
-            if (position.center != null) {
-              onMapMoved((position.center!, position.zoom ?? zoom));
-            }
-          },
+          subdomains: const ['a', 'b', 'c'],
         ),
-        children: [
-          TileLayer(
-            urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-            userAgentPackageName: 'com.example.khamosayee_map_ble',
-            minZoom: 3.0,
-            maxZoom: 19.0,
-            subdomains: const ['a', 'b', 'c'],
-          ),
-          if (userTrail.length > 1 || bleTrail.length > 1)
-            PolylineLayer(
-              polylines: [
-                if (userTrail.length > 1)
-                  Polyline(
-                    points: userTrail,
-                    color: const Color(0xFF1E88E5).withOpacity(0.75),
-                    strokeWidth: 4.0,
-                  ),
-                if (bleTrail.length > 1)
-                  Polyline(
-                    points: bleTrail,
-                    color: Colors.blueAccent.withOpacity(0.65),
-                    strokeWidth: 4.0,
-                  ),
-              ],
-            ),
-          MarkerLayer(
-            markers: [
-              if (userPosition != null)
-                Marker(
-                  width: 40.0,
-                  height: 40.0,
-                  point: userPosition!,
-                  builder: (context) =>
-                      const Icon(Icons.navigation, color: Color(0xFF1E88E5), size: 34),
+        if (userTrail.length > 1 || bleTrail.length > 1)
+          PolylineLayer(
+            polylines: [
+              if (userTrail.length > 1)
+                Polyline(
+                  points: userTrail,
+                  color: const Color(0xFF1E88E5).withOpacity(0.75),
+                  strokeWidth: 4.0,
                 ),
-              if (blePosition != null)
-                Marker(
-                  width: 64.0,
-                  height: 64.0,
-                  point: blePosition!,
-                  builder: (context) => _HeadingConeMarker(headingDeg: headingDeg),
-                ),
-              if (targetPosition != null)
-                Marker(
-                  width: 44.0,
-                  height: 44.0,
-                  point: targetPosition!,
-                  builder: (context) => const Icon(Icons.flag, color: Color(0xFFE65100), size: 36),
+              if (bleTrail.length > 1)
+                Polyline(
+                  points: bleTrail,
+                  color: Colors.blueAccent.withOpacity(0.65),
+                  strokeWidth: 4.0,
                 ),
             ],
           ),
-        ],
-      ),
+        MarkerLayer(
+          markers: [
+            if (userPosition != null)
+              Marker(
+                width: 48.0,
+                height: 48.0,
+                point: userPosition!,
+                builder: (context) => _PhoneHeadingMarker(headingDeg: userHeadingDeg),
+              ),
+            if (blePosition != null)
+              Marker(
+                width: 64.0,
+                height: 64.0,
+                point: blePosition!,
+                builder: (context) => _HeadingConeMarker(headingDeg: headingDeg),
+              ),
+            if (targetPosition != null)
+              Marker(
+                width: 44.0,
+                height: 44.0,
+                point: targetPosition!,
+                builder: (context) => const Icon(Icons.flag, color: Color(0xFFE65100), size: 36),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _PhoneHeadingMarker extends StatelessWidget {
+  const _PhoneHeadingMarker({required this.headingDeg});
+
+  final double? headingDeg;
+
+  @override
+  Widget build(BuildContext context) {
+    final rotation = ((headingDeg ?? 0.0) - 90.0) * math.pi / 180.0;
+
+    return Transform.rotate(
+      angle: rotation,
+      child: const Icon(Icons.navigation, color: Color(0xFF1E88E5), size: 38),
     );
   }
 }

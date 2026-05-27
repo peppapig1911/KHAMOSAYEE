@@ -1,15 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:latlong2/latlong.dart';
 
 class LocationOverlay extends StatelessWidget {
-  final LatLng? userPosition;
   final String? locationError;
   final bool isLocating;
   final VoidCallback onRecenter;
 
   const LocationOverlay({
     super.key,
-    required this.userPosition,
     required this.locationError,
     required this.isLocating,
     required this.onRecenter,
@@ -17,45 +14,26 @@ class LocationOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        // Position info
-        if (userPosition != null)
-          Positioned(
-            top: 240,
-            left: 16,
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              color: Colors.black54,
-              child: Text(
-                'User position: ${userPosition!.latitude.toStringAsFixed(6)}, ${userPosition!.longitude.toStringAsFixed(6)}',
-                style: const TextStyle(color: Colors.white, fontSize: 12),
-              ),
-            ),
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.92),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
           ),
-        // Error message
-        if (locationError != null)
-          Positioned(
-            top: userPosition != null ? 290 : 240,
-            left: 16,
-            right: 16,
-            child: Container(
-              padding: const EdgeInsets.all(10),
-              color: Colors.black54,
-              child: Text(
-                locationError!,
-                style: const TextStyle(color: Colors.orangeAccent, fontSize: 12),
-              ),
-            ),
-          ),
-        // Recenter button
-        Positioned(
-          bottom: 24,
-          right: 16,
-          child: FloatingActionButton(
-            backgroundColor: Colors.black54,
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton.small(
+            backgroundColor: const Color(0xFF0F766E),
             foregroundColor: Colors.white,
-            mini: true,
             onPressed: isLocating ? null : onRecenter,
             child: isLocating
                 ? const SizedBox(
@@ -68,8 +46,25 @@ class LocationOverlay extends StatelessWidget {
                   )
                 : const Icon(Icons.my_location),
           ),
-        ),
-      ],
+          if (locationError != null) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: 120,
+              child: Text(
+                locationError!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: Color(0xFF92400E),
+                  fontWeight: FontWeight.w600,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

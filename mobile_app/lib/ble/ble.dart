@@ -37,6 +37,7 @@ class WindBleClient {
   static final Guid longitudeChar = Guid('00002A6A-0000-1000-8000-00805F9B34FB');
   static final Guid altitudeChar = Guid('00002A6B-0000-1000-8000-00805F9B34FB');
   static final Guid headingChar = Guid('0000FFF5-0000-1000-8000-00805F9B34FB');
+  static final Guid gpsAccuracyChar = Guid('0000FFF6-0000-1000-8000-00805F9B34FB');
   static final Guid manualModeChar = Guid('0000FFF1-0000-1000-8000-00805F9B34FB');
   static final Guid frontWheelOffsetChar = Guid('0000FFF2-0000-1000-8000-00805F9B34FB');
   static final Guid sailOpeningChar = Guid('0000FFF3-0000-1000-8000-00805F9B34FB');
@@ -58,6 +59,7 @@ class WindBleClient {
   BluetoothCharacteristic? _longitudeCharacteristic;
   BluetoothCharacteristic? _altitudeCharacteristic;
   BluetoothCharacteristic? _headingCharacteristic;
+  BluetoothCharacteristic? _gpsAccuracyCharacteristic;
   BluetoothCharacteristic? _manualModeCharacteristic;
   BluetoothCharacteristic? _frontWheelOffsetCharacteristic;
   BluetoothCharacteristic? _sailOpeningCharacteristic;
@@ -202,6 +204,7 @@ class WindBleClient {
     _longitudeCharacteristic = null;
     _altitudeCharacteristic = null;
     _headingCharacteristic = null;
+    _gpsAccuracyCharacteristic = null;
     _manualModeCharacteristic = null;
     _frontWheelOffsetCharacteristic = null;
     _sailOpeningCharacteristic = null;
@@ -239,6 +242,8 @@ class WindBleClient {
           _altitudeCharacteristic = c;
         } else if (c.uuid == headingChar) {
           _headingCharacteristic = c;
+        } else if (c.uuid == gpsAccuracyChar) {
+          _gpsAccuracyCharacteristic = c;
         } else if (c.uuid == manualModeChar) {
           _manualModeCharacteristic = c;
         } else if (c.uuid == frontWheelOffsetChar) {
@@ -363,6 +368,24 @@ class WindBleClient {
 
           _latestNavigationData = _latestNavigationData.copyWith(
             headingDeg: raw / 100.0,
+            timestamp: DateTime.now(),
+          );
+          _dataController.add(
+            BleData(wind: _latestWindData, gps: _latestGpsData, navigation: _latestNavigationData),
+          );
+        },
+      );
+    }
+
+    if (_gpsAccuracyCharacteristic != null) {
+      await _subscribeCharacteristic(
+        _gpsAccuracyCharacteristic!,
+        onData: (value) {
+          final raw = _readUint16LittleEndian(value);
+          if (raw == null) return;
+
+          _latestGpsData = _latestGpsData.copyWith(
+            accuracyM: raw / 100.0,
             timestamp: DateTime.now(),
           );
           _dataController.add(
