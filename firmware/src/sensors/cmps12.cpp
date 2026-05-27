@@ -52,12 +52,9 @@ CalibData CMPS12::calibration()
 
 bool CMPS12::read_register(unsigned char reg, unsigned char *dst, uint length)
 {
-    if (_i2c.write(_addr, &reg, 1, true) != 1)
-        return false;
-    if (_i2c.read(_addr, dst, length, false) != length)
-        return false;
-
-    return true;
+    // Single transactional call so another bus user cannot slip a transaction
+    // between the register-pointer write and the data read.
+    return _i2c.write_read(_addr, &reg, 1, dst, length) == (int)length;
 }
 
 XYZ XYZ::fromBuffer(unsigned char *buffer)
