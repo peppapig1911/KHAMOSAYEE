@@ -24,7 +24,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'KHAMOSAYEE Navigator',
+      title: 'KHAMOSAYEE',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -420,7 +420,7 @@ class _MapBlePageState extends State<MapBlePage> {
       appBar: AppBar(
         elevation: 0,
         backgroundColor: const Color(0xFF0F766E),
-        title: const Text('KHAMOSAYEE Navigator', style: TextStyle(fontWeight: FontWeight.w800)),
+        title: const Text('KHAMOSAYEE', style: TextStyle(fontWeight: FontWeight.w800)),
         actions: [
           IconButton(
             tooltip: _followVessel ? 'Stop following vessel' : 'Follow vessel',

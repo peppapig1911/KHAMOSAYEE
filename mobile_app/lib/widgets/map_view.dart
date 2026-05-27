@@ -54,7 +54,7 @@ class MapViewWidget extends StatelessWidget {
       children: [
         TileLayer(
           urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'com.example.khamosayee_map_ble',
+          userAgentPackageName: 'fr.ec_nantes.khamosayee',
           minZoom: 3.0,
           maxZoom: 19.0,
           subdomains: const ['a', 'b', 'c'],
