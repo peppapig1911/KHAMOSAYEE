@@ -36,3 +36,21 @@ CHARACTERISTIC, 0x2A6A, READ | NOTIFY | DYNAMIC,
 
 // Altitude (0x2A6B) — int32, millimeters
 CHARACTERISTIC, 0x2A6B, READ | NOTIFY | DYNAMIC,
+
+// Heading (0..359.99 degrees)
+CHARACTERISTIC, 0xFFF5, READ | NOTIFY | DYNAMIC,
+
+// === Manual Control Service (0xFFF0) ===
+PRIMARY_SERVICE, 0xFFF0
+
+// Control mode (0 = automatic, 1 = manual)
+CHARACTERISTIC, 0xFFF1, READ | WRITE | DYNAMIC,
+
+// Front wheel steering offset in degrees relative to center (-45..45)
+CHARACTERISTIC, 0xFFF2, READ | WRITE | DYNAMIC,
+
+// Sail opening percentage (0..100)
+CHARACTERISTIC, 0xFFF3, READ | WRITE | DYNAMIC,
+
+// Target waypoint as latitude/longitude in 1e-7 degrees (8 bytes, little-endian)
+CHARACTERISTIC, 0xFFF4, WRITE | DYNAMIC,

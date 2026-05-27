@@ -1,3 +1,6 @@
+import 'dart:ui' as ui;
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -6,6 +9,8 @@ class MapViewWidget extends StatelessWidget {
   final MapController mapController;
   final LatLng? userPosition;
   final LatLng? blePosition;
+  final double? headingDeg;
+  final LatLng? targetPosition;
   final List<LatLng> userTrail;
   final List<LatLng> bleTrail;
   final LatLng center;
@@ -18,6 +23,8 @@ class MapViewWidget extends StatelessWidget {
     required this.mapController,
     required this.userPosition,
     required this.blePosition,
+    required this.headingDeg,
+    required this.targetPosition,
     required this.userTrail,
     required this.bleTrail,
     required this.center,
@@ -80,15 +87,75 @@ class MapViewWidget extends StatelessWidget {
                 ),
               if (blePosition != null)
                 Marker(
-                  width: 40.0,
-                  height: 40.0,
+                  width: 64.0,
+                  height: 64.0,
                   point: blePosition!,
-                  builder: (context) => const Icon(Icons.location_on, color: Colors.blue, size: 40),
+                  builder: (context) => _HeadingConeMarker(headingDeg: headingDeg),
+                ),
+              if (targetPosition != null)
+                Marker(
+                  width: 44.0,
+                  height: 44.0,
+                  point: targetPosition!,
+                  builder: (context) => const Icon(Icons.flag, color: Color(0xFFE65100), size: 36),
                 ),
             ],
           ),
         ],
       ),
     );
+  }
+}
+
+class _HeadingConeMarker extends StatelessWidget {
+  const _HeadingConeMarker({required this.headingDeg});
+
+  final double? headingDeg;
+
+  @override
+  Widget build(BuildContext context) {
+    final rotation = ((headingDeg ?? 0.0) - 90.0) * math.pi / 180.0;
+
+    return Transform.rotate(
+      angle: rotation,
+      child: CustomPaint(
+        size: const Size(64, 64),
+        painter: _HeadingConePainter(color: const Color(0xFF1565C0)),
+      ),
+    );
+  }
+}
+
+class _HeadingConePainter extends CustomPainter {
+  const _HeadingConePainter({required this.color});
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = ui.Offset(size.width / 2, size.height / 2);
+    final conePath = ui.Path()
+      ..moveTo(center.dx, size.height * 0.06)
+      ..lineTo(size.width * 0.78, size.height * 0.82)
+      ..lineTo(size.width * 0.22, size.height * 0.82)
+      ..close();
+
+    final fillPaint = ui.Paint()
+      ..color = color.withValues(alpha: 0.20)
+      ..style = PaintingStyle.fill;
+    canvas.drawPath(conePath, fillPaint);
+
+    final outlinePaint = ui.Paint()
+      ..color = color.withValues(alpha: 0.85)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0;
+    canvas.drawPath(conePath, outlinePaint);
+
+    canvas.drawCircle(center, 4.0, ui.Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(covariant _HeadingConePainter oldDelegate) {
+    return oldDelegate.color != color;
   }
 }

@@ -162,7 +162,7 @@ void NtripClient::run()
         }
 
         uint32_t now_ms = to_ms_since_boot(get_absolute_time());
-        if (_gga_source != nullptr && (last_gga_ms == 0 || now_ms - last_gga_ms >= 10000U))
+        if (_gga_source != nullptr && (last_gga_ms == 0 || now_ms - last_gga_ms >= 1000U))
         {
             if (sendGga())
                 last_gga_ms = now_ms;

@@ -5,10 +5,10 @@
 
 RawData CMPS12::raw()
 {
-    unsigned char buffer[18];
+    unsigned char buffer[18] = {};
     if (!read_register(0x06, buffer, 18))
     {
-        // TODO: Handle error
+        return RawData{};
     }
 
     return RawData{

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import '../ble/ble.dart';
+import 'manual_control_page.dart';
 
 class BleDeviceSelectionPage extends StatefulWidget {
   final WindBleClient bleClient;
@@ -72,6 +73,21 @@ class _BleDeviceSelectionPageState extends State<BleDeviceSelectionPage> {
         title: const Text('Select BLE Device'),
         backgroundColor: const Color(0xFF5ECCC0),
         elevation: 0,
+        actions: [
+          IconButton(
+            tooltip: 'Manual control',
+            icon: const Icon(Icons.tune),
+            onPressed: widget.bleClient.isConnected
+                ? () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => ManualControlPage(bleClient: widget.bleClient),
+                      ),
+                    );
+                  }
+                : null,
+          ),
+        ],
       ),
       body: Column(
         children: [

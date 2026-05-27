@@ -8,17 +8,27 @@ import 'data.dart';
 
 enum BleConnectionState { idle, scanning, connecting, connected, disconnected, error }
 
+enum BleControlMode {
+  automatic(0),
+  manual(1);
+
+  const BleControlMode(this.value);
+  final int value;
+}
+
 class BleData {
   final WindGattData wind;
   final GPSData gps;
+  final NavigationData navigation;
 
-  BleData({required this.wind, required this.gps});
+  BleData({required this.wind, required this.gps, required this.navigation});
 }
 
 /// BLE manager for scanning, connecting and consuming wind GATT data.
 class WindBleClient {
   static final Guid environmentalSensingService = Guid('0000181A-0000-1000-8000-00805F9B34FB');
   static final Guid batteryService = Guid('0000180F-0000-1000-8000-00805F9B34FB');
+  static final Guid manualControlService = Guid('0000FFF0-0000-1000-8000-00805F9B34FB');
 
   static final Guid apparentWindSpeedChar = Guid('00002A72-0000-1000-8000-00805F9B34FB');
   static final Guid apparentWindDirectionChar = Guid('00002A73-0000-1000-8000-00805F9B34FB');
@@ -26,6 +36,11 @@ class WindBleClient {
   static final Guid latitudeChar = Guid('00002A69-0000-1000-8000-00805F9B34FB');
   static final Guid longitudeChar = Guid('00002A6A-0000-1000-8000-00805F9B34FB');
   static final Guid altitudeChar = Guid('00002A6B-0000-1000-8000-00805F9B34FB');
+  static final Guid headingChar = Guid('0000FFF5-0000-1000-8000-00805F9B34FB');
+  static final Guid manualModeChar = Guid('0000FFF1-0000-1000-8000-00805F9B34FB');
+  static final Guid frontWheelOffsetChar = Guid('0000FFF2-0000-1000-8000-00805F9B34FB');
+  static final Guid sailOpeningChar = Guid('0000FFF3-0000-1000-8000-00805F9B34FB');
+  static final Guid targetWaypointChar = Guid('0000FFF4-0000-1000-8000-00805F9B34FB');
 
   final _stateController = StreamController<BleConnectionState>.broadcast();
   final _dataController = StreamController<BleData>.broadcast();
@@ -42,6 +57,11 @@ class WindBleClient {
   BluetoothCharacteristic? _latitudeCharacteristic;
   BluetoothCharacteristic? _longitudeCharacteristic;
   BluetoothCharacteristic? _altitudeCharacteristic;
+  BluetoothCharacteristic? _headingCharacteristic;
+  BluetoothCharacteristic? _manualModeCharacteristic;
+  BluetoothCharacteristic? _frontWheelOffsetCharacteristic;
+  BluetoothCharacteristic? _sailOpeningCharacteristic;
+  BluetoothCharacteristic? _targetWaypointCharacteristic;
 
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothConnectionState>? _deviceStateSub;
@@ -59,6 +79,11 @@ class WindBleClient {
     longitude: 0.0,
     altitudeM: 0.0,
     accuracyM: 0.0,
+    timestamp: DateTime.now(),
+  );
+
+  NavigationData _latestNavigationData = NavigationData(
+    headingDeg: null,
     timestamp: DateTime.now(),
   );
 
@@ -176,6 +201,11 @@ class WindBleClient {
     _latitudeCharacteristic = null;
     _longitudeCharacteristic = null;
     _altitudeCharacteristic = null;
+    _headingCharacteristic = null;
+    _manualModeCharacteristic = null;
+    _frontWheelOffsetCharacteristic = null;
+    _sailOpeningCharacteristic = null;
+    _targetWaypointCharacteristic = null;
     _emitState(BleConnectionState.idle);
   }
 
@@ -207,6 +237,16 @@ class WindBleClient {
           _longitudeCharacteristic = c;
         } else if (c.uuid == altitudeChar) {
           _altitudeCharacteristic = c;
+        } else if (c.uuid == headingChar) {
+          _headingCharacteristic = c;
+        } else if (c.uuid == manualModeChar) {
+          _manualModeCharacteristic = c;
+        } else if (c.uuid == frontWheelOffsetChar) {
+          _frontWheelOffsetCharacteristic = c;
+        } else if (c.uuid == sailOpeningChar) {
+          _sailOpeningCharacteristic = c;
+        } else if (c.uuid == targetWaypointChar) {
+          _targetWaypointCharacteristic = c;
         }
       }
     }
@@ -225,7 +265,9 @@ class WindBleClient {
           windSpeedMs: raw / 100.0,
           timestamp: DateTime.now(),
         );
-        _dataController.add(BleData(wind: _latestWindData, gps: _latestGpsData));
+        _dataController.add(
+          BleData(wind: _latestWindData, gps: _latestGpsData, navigation: _latestNavigationData),
+        );
       },
     );
 
@@ -239,7 +281,9 @@ class WindBleClient {
           windDirectionDeg: raw / 100.0,
           timestamp: DateTime.now(),
         );
-        _dataController.add(BleData(wind: _latestWindData, gps: _latestGpsData));
+        _dataController.add(
+          BleData(wind: _latestWindData, gps: _latestGpsData, navigation: _latestNavigationData),
+        );
       },
     );
 
@@ -253,7 +297,9 @@ class WindBleClient {
             batteryPercent: value.first,
             timestamp: DateTime.now(),
           );
-          _dataController.add(BleData(wind: _latestWindData, gps: _latestGpsData));
+          _dataController.add(
+            BleData(wind: _latestWindData, gps: _latestGpsData, navigation: _latestNavigationData),
+          );
         },
       );
     }
@@ -267,7 +313,9 @@ class WindBleClient {
 
           final latitude = raw * 1e-7;
           _latestGpsData = _latestGpsData.copyWith(latitude: latitude, timestamp: DateTime.now());
-          _dataController.add(BleData(wind: _latestWindData, gps: _latestGpsData));
+          _dataController.add(
+            BleData(wind: _latestWindData, gps: _latestGpsData, navigation: _latestNavigationData),
+          );
         },
       );
     }
@@ -281,7 +329,9 @@ class WindBleClient {
 
           final longitude = raw * 1e-7;
           _latestGpsData = _latestGpsData.copyWith(longitude: longitude, timestamp: DateTime.now());
-          _dataController.add(BleData(wind: _latestWindData, gps: _latestGpsData));
+          _dataController.add(
+            BleData(wind: _latestWindData, gps: _latestGpsData, navigation: _latestNavigationData),
+          );
         },
       );
     }
@@ -297,10 +347,61 @@ class WindBleClient {
             altitudeM: raw / 1000.0,
             timestamp: DateTime.now(),
           );
-          _dataController.add(BleData(wind: _latestWindData, gps: _latestGpsData));
+          _dataController.add(
+            BleData(wind: _latestWindData, gps: _latestGpsData, navigation: _latestNavigationData),
+          );
         },
       );
     }
+
+    if (_headingCharacteristic != null) {
+      await _subscribeCharacteristic(
+        _headingCharacteristic!,
+        onData: (value) {
+          final raw = _readUint16LittleEndian(value);
+          if (raw == null) return;
+
+          _latestNavigationData = _latestNavigationData.copyWith(
+            headingDeg: raw / 100.0,
+            timestamp: DateTime.now(),
+          );
+          _dataController.add(
+            BleData(wind: _latestWindData, gps: _latestGpsData, navigation: _latestNavigationData),
+          );
+        },
+      );
+    }
+  }
+
+  Future<void> setControlMode(BleControlMode mode) async {
+    await _writeUint8(_manualModeCharacteristic, mode.value);
+  }
+
+  Future<void> setFrontWheelOffset(double percent) async {
+    final clamped = percent.round().clamp(0, 100);
+    final characteristic = _frontWheelOffsetCharacteristic;
+    if (characteristic == null) {
+      throw StateError('Manual control characteristic is not available.');
+    }
+
+    await _writeUint8(characteristic, clamped);
+  }
+
+  Future<void> setSailOpeningPercent(double percent) async {
+    final clamped = percent.round().clamp(0, 100);
+    await _writeUint8(_sailOpeningCharacteristic, clamped);
+  }
+
+  Future<void> setTargetWaypoint(double latitude, double longitude) async {
+    final characteristic = _targetWaypointCharacteristic;
+    if (characteristic == null) {
+      throw StateError('Target waypoint characteristic is not available.');
+    }
+
+    final byteData = ByteData(8);
+    byteData.setInt32(0, (latitude * 1e7).round(), Endian.little);
+    byteData.setInt32(4, (longitude * 1e7).round(), Endian.little);
+    await _writeBytes(characteristic, byteData.buffer.asUint8List());
   }
 
   Future<void> _subscribeCharacteristic(
@@ -322,6 +423,22 @@ class WindBleClient {
       final value = await characteristic.read();
       onData(value);
     }
+  }
+
+  Future<void> _writeUint8(BluetoothCharacteristic? characteristic, int value) async {
+    if (characteristic == null) {
+      throw StateError('Manual control characteristic is not available.');
+    }
+
+    await _writeBytes(characteristic, [value & 0xFF]);
+  }
+
+  Future<void> _writeBytes(BluetoothCharacteristic characteristic, List<int> value) async {
+    if (!characteristic.properties.write && !characteristic.properties.writeWithoutResponse) {
+      throw StateError('Characteristic ${characteristic.uuid.str} is not writable.');
+    }
+
+    await characteristic.write(value, withoutResponse: false);
   }
 
   int? _readUint16LittleEndian(List<int> value) {

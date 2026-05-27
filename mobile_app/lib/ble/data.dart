@@ -63,3 +63,17 @@ class GPSData {
     );
   }
 }
+
+class NavigationData {
+  const NavigationData({required this.headingDeg, required this.timestamp});
+
+  final double? headingDeg;
+  final DateTime timestamp;
+
+  NavigationData copyWith({double? headingDeg, DateTime? timestamp}) {
+    return NavigationData(
+      headingDeg: headingDeg ?? this.headingDeg,
+      timestamp: timestamp ?? this.timestamp,
+    );
+  }
+}

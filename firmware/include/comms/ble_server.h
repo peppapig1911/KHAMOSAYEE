@@ -35,6 +35,12 @@ public:
 
     /// Feed GNSS location data to the server. Triggers notifications if clients are subscribed.
     void updateLocation(const GNSSData *data);
+
+    /// Feed compass heading in degrees to the server. Triggers notifications if clients are subscribed.
+    void updateHeading(float heading_deg);
 };
+
+uint8_t get_current_front_wheel_offset();
+uint8_t get_current_sail_opening_pct();
 
 #endif // BLE_SERVER_H

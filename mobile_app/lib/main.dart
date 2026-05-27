@@ -11,6 +11,7 @@ import 'widgets/wind_data_card.dart';
 import 'widgets/map_view.dart';
 import 'widgets/location_overlay.dart';
 import 'widgets/ble_device_selection.dart';
+import 'widgets/manual_control_page.dart';
 
 void main() {
   runApp(const MyApp());
@@ -52,6 +53,7 @@ class _MapBlePageState extends State<MapBlePage> {
   BleConnectionState _bleState = BleConnectionState.idle;
   BleData? _data;
   String? _bleError;
+  LatLng? _targetPosition;
   final MapController _mapController = MapController();
 
   @override
@@ -196,8 +198,11 @@ class _MapBlePageState extends State<MapBlePage> {
   }
 
   void _onMapTap(TapPosition tapPosition, LatLng point) {
-    // Keep user location tied to GPS; tapping only pans the map.
+    setState(() {
+      _targetPosition = point;
+    });
     _mapController.move(point, _mapController.zoom);
+    unawaited(_sendTargetWaypoint(point));
   }
 
   void _onMapMoved((LatLng, double) camera) {
@@ -218,6 +223,21 @@ class _MapBlePageState extends State<MapBlePage> {
     trail.add(point);
     if (trail.length > 300) {
       trail.removeAt(0);
+    }
+  }
+
+  Future<void> _sendTargetWaypoint(LatLng point) async {
+    if (!_bleClient.isConnected) {
+      return;
+    }
+
+    try {
+      await _bleClient.setTargetWaypoint(point.latitude, point.longitude);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to send target waypoint: $e')));
     }
   }
 
@@ -268,6 +288,17 @@ class _MapBlePageState extends State<MapBlePage> {
             Text(bleStatus, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500)),
           ],
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Manual control',
+            icon: const Icon(Icons.tune),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => ManualControlPage(bleClient: _bleClient)),
+              );
+            },
+          ),
+        ],
       ),
       body: Stack(
         children: [
@@ -277,7 +308,11 @@ class _MapBlePageState extends State<MapBlePage> {
               MapViewWidget(
                 mapController: _mapController,
                 userPosition: _userPosition,
-                blePosition: LatLng(_data!.gps.latitude, _data!.gps.longitude),
+                blePosition: _data != null
+                    ? LatLng(_data!.gps.latitude, _data!.gps.longitude)
+                    : null,
+                headingDeg: _data?.navigation.headingDeg,
+                targetPosition: _targetPosition,
                 userTrail: _userTrail,
                 bleTrail: _bleTrail,
                 center: _mapCenter,
@@ -320,6 +355,7 @@ class _MapBlePageState extends State<MapBlePage> {
   Future<void> _connectToSelectedDevice(BluetoothDevice device) async {
     try {
       await _bleClient.connect(device);
+      await _bleClient.setControlMode(BleControlMode.automatic);
       if (mounted) {
         setState(() {});
       }
