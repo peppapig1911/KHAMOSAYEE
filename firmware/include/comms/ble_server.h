@@ -31,7 +31,7 @@ public:
     void startAdvertising();
 
     /// Feed new sensor data to the server. Triggers notifications if clients are subscribed.
-    void update(const CalypsoData *data);
+    void updateWind(const CalypsoData *data);
 
     /// Feed GNSS location data to the server. Triggers notifications if clients are subscribed.
     void updateLocation(const GNSSData *data);

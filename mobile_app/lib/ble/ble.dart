@@ -68,6 +68,7 @@ class WindBleClient {
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothConnectionState>? _deviceStateSub;
   final List<StreamSubscription<List<int>>> _notifySubs = <StreamSubscription<List<int>>>[];
+  Future<void> _writeQueue = Future<void>.value();
 
   WindGattData _latestWindData = WindGattData(
     windSpeedMs: null,
@@ -397,7 +398,7 @@ class WindBleClient {
   }
 
   Future<void> setControlMode(BleControlMode mode) async {
-    await _writeUint8(_manualModeCharacteristic, mode.value);
+    await _writeUint8(_manualModeCharacteristic, mode.value, preferWithoutResponse: true);
   }
 
   Future<void> setFrontWheelOffset(double percent) async {
@@ -407,12 +408,12 @@ class WindBleClient {
       throw StateError('Manual control characteristic is not available.');
     }
 
-    await _writeUint8(characteristic, clamped);
+    await _writeUint8(characteristic, clamped, preferWithoutResponse: true);
   }
 
   Future<void> setSailOpeningPercent(double percent) async {
     final clamped = percent.round().clamp(0, 100);
-    await _writeUint8(_sailOpeningCharacteristic, clamped);
+    await _writeUint8(_sailOpeningCharacteristic, clamped, preferWithoutResponse: true);
   }
 
   Future<void> setTargetWaypoint(double latitude, double longitude) async {
@@ -448,20 +449,35 @@ class WindBleClient {
     }
   }
 
-  Future<void> _writeUint8(BluetoothCharacteristic? characteristic, int value) async {
+  Future<void> _writeUint8(
+    BluetoothCharacteristic? characteristic,
+    int value, {
+    bool preferWithoutResponse = false,
+  }) async {
     if (characteristic == null) {
       throw StateError('Manual control characteristic is not available.');
     }
 
-    await _writeBytes(characteristic, [value & 0xFF]);
+    await _writeBytes(characteristic, [value & 0xFF], preferWithoutResponse: preferWithoutResponse);
   }
 
-  Future<void> _writeBytes(BluetoothCharacteristic characteristic, List<int> value) async {
+  Future<void> _writeBytes(
+    BluetoothCharacteristic characteristic,
+    List<int> value, {
+    bool preferWithoutResponse = false,
+  }) async {
     if (!characteristic.properties.write && !characteristic.properties.writeWithoutResponse) {
       throw StateError('Characteristic ${characteristic.uuid.str} is not writable.');
     }
 
-    await characteristic.write(value, withoutResponse: false);
+    final nextWrite = _writeQueue.then((_) async {
+      final withoutResponse =
+          preferWithoutResponse && characteristic.properties.writeWithoutResponse;
+      await characteristic.write(value, withoutResponse: withoutResponse);
+    });
+
+    _writeQueue = nextWrite.catchError((_) {});
+    await nextWrite;
   }
 
   int? _readUint16LittleEndian(List<int> value) {

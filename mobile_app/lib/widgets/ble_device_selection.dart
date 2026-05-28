@@ -44,7 +44,13 @@ class _BleDeviceSelectionPageState extends State<BleDeviceSelectionPage> {
   Future<void> _startScanning() async {
     if (_isScanning) return;
     setState(() => _isScanning = true);
-    await widget.bleClient.startScanning();
+    try {
+      await widget.bleClient.startScanning();
+    } finally {
+      if (mounted) {
+        setState(() => _isScanning = false);
+      }
+    }
   }
 
   Future<void> _stopScanning() async {

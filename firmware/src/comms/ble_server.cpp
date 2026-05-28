@@ -12,9 +12,9 @@
  *     └── Heading                 0xFFF5  READ | NOTIFY
  *     └── GPS Accuracy            0xFFF6  READ | NOTIFY
  *   Manual Control Service 0xFFF0
- *     ├── Control Mode             0xFFF1  READ | WRITE
- *     ├── Front Wheel Offset       0xFFF2  READ | WRITE
- *     └── Sail Opening             0xFFF3  READ | WRITE
+ *     ├── Control Mode             0xFFF1  READ | WRITE | WRITE_CMD
+ *     ├── Front Wheel Position     0xFFF2  READ | WRITE | WRITE_CMD
+ *     └── Sail Opening             0xFFF3  READ | WRITE | WRITE_CMD
  *     └── Target Waypoint          0xFFF4  WRITE
  */
 
@@ -81,7 +81,7 @@ static int32_t current_altitude_raw = 0;        // millimeters
 static uint16_t current_heading_raw = 0;        // 0.01 degrees
 static uint16_t current_accuracy_raw = 0;       // 0.01 meters
 static uint8_t current_control_mode = 0;        // 0 = auto, 1 = manual
-static uint8_t current_front_wheel_offset = 0;  // 0-100
+static uint8_t current_front_wheel_offset = 0;  // 0-100 percent position
 static uint8_t current_sail_opening_pct = 0;    // 0-100
 
 uint8_t get_current_front_wheel_offset()
@@ -317,11 +317,12 @@ void BleServer::startAdvertising()
     LOGI(MODULE, "Advertising as \"KHAMOSAYEE\" (%s)...", bd_addr_to_str(local_addr));
 }
 
-void BleServer::update(const CalypsoData *data)
+void BleServer::updateWind(const CalypsoData *data)
 {
     current_wind_speed_raw = static_cast<uint16_t>(data->wind_speed * 100.0f);
     current_wind_direction_raw = static_cast<uint16_t>(data->wind_direction * 100.0f);
-    current_battery_pct = static_cast<uint8_t>(data->battery * 10.0f);
+    const float battery_pct = data->battery < 0.0f ? 0.0f : (data->battery > 100.0f ? 100.0f : data->battery);
+    current_battery_pct = static_cast<uint8_t>(battery_pct);
 
     if (con_handle == HCI_CON_HANDLE_INVALID)
         return;

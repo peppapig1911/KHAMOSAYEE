@@ -15,7 +15,6 @@
 
 #include "controller.h"
 #include "log.h"
-#include "navigation.h"
 
 #include <cmath>
 #include <cstring>
@@ -117,24 +116,38 @@ static void print_position_task(void *param)
 
         ble_server.updateLocation(&position);
         ble_server.updateHeading(controller_get_telemetry().psi);
-        LOGI(MODULE,
-             "POS lat=%.7f lon=%.7f alt=%.1f hacc=%.1fcm vacc=%.1fcm fix=%u sats=%u rtk=%u",
-             position.lat,
-             position.lon,
-             position.altitude,
-             position.h_acc * 100.0f,
-             position.v_acc * 100.0f,
-             position.fix_type,
-             position.num_sv,
-             static_cast<unsigned>(gps_device->rtk_state()));
+        // LOGI(MODULE,
+        //      "POS lat=%.7f lon=%.7f alt=%.1f hacc=%.1fcm vacc=%.1fcm fix=%u sats=%u rtk=%u",
+        //      position.lat,
+        //      position.lon,
+        //      position.altitude,
+        //      position.h_acc * 100.0f,
+        //      position.v_acc * 100.0f,
+        //      position.fix_type,
+        //      position.num_sv,
+        //      static_cast<unsigned>(gps_device->rtk_state()));
     }
 }
+
+// Start a task to forward Calypso anemometer measurements to the controller
+static void calypso_poll_task(void *p)
+{
+    UNUSED(p);
+    while (true)
+    {
+        CalypsoData d = calypso.getData();
+        // wind_direction is degrees, wind_speed in m/s
+        controller_update_wind(d.wind_direction, d.wind_speed);
+        ble_server.updateWind(&d);
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+};
 
 static void wifi_init_task(void *param)
 {
     UNUSED(param);
 
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(1000));
 
     LOGI(MODULE, "I2C initialized at %u baud", i2c.init());
 
@@ -186,6 +199,11 @@ static void wifi_init_task(void *param)
     if (!controller_start(gps, cmps12))
     {
         LOGE(MODULE, "Failed to start controller task!");
+    }
+
+    if (xTaskCreate(calypso_poll_task, "calypsoPoll", 1024, NULL, tskIDLE_PRIORITY + 1, NULL) != pdPASS)
+    {
+        LOGE(MODULE, "Failed to start Calypso poll task!");
     }
 
     if (xTaskCreate(print_position_task, "gpsBleTask", 2048, (void *)&gps, tskIDLE_PRIORITY, NULL) != pdPASS)

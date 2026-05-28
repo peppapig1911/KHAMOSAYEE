@@ -47,13 +47,13 @@ CHARACTERISTIC, 0xFFF6, READ | NOTIFY | DYNAMIC,
 PRIMARY_SERVICE, 0xFFF0
 
 // Control mode (0 = automatic, 1 = manual)
-CHARACTERISTIC, 0xFFF1, READ | WRITE | DYNAMIC,
+CHARACTERISTIC, 0xFFF1, READ | WRITE | WRITE_WITHOUT_RESPONSE | DYNAMIC,
 
-// Front wheel steering offset in degrees relative to center (-45..45)
-CHARACTERISTIC, 0xFFF2, READ | WRITE | DYNAMIC,
+// Front wheel servo position percentage (0..100)
+CHARACTERISTIC, 0xFFF2, READ | WRITE | WRITE_WITHOUT_RESPONSE | DYNAMIC,
 
 // Sail opening percentage (0..100)
-CHARACTERISTIC, 0xFFF3, READ | WRITE | DYNAMIC,
+CHARACTERISTIC, 0xFFF3, READ | WRITE | WRITE_WITHOUT_RESPONSE | DYNAMIC,
 
 // Target waypoint as latitude/longitude in 1e-7 degrees (8 bytes, little-endian)
 CHARACTERISTIC, 0xFFF4, WRITE | DYNAMIC,

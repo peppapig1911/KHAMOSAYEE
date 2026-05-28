@@ -65,11 +65,11 @@ class _MapBlePageState extends State<MapBlePage> {
   BleConnectionState _bleState = BleConnectionState.idle;
   BleData? _data;
   String? _bleError;
+  bool _locationStreamsStarted = false;
 
   @override
   void initState() {
     super.initState();
-    unawaited(_initializeLocation());
     _setupBle();
   }
 
@@ -192,6 +192,11 @@ class _MapBlePageState extends State<MapBlePage> {
   }
 
   Future<void> _initializeLocation() async {
+    if (_locationStreamsStarted) {
+      return;
+    }
+
+    _locationStreamsStarted = true;
     await _refreshUserLocation(moveMap: true);
     _startPositionStream();
     _startCompassHeadingStream();
@@ -378,6 +383,7 @@ class _MapBlePageState extends State<MapBlePage> {
     try {
       await _bleClient.connect(device);
       await _bleClient.setControlMode(BleControlMode.automatic);
+      unawaited(_initializeLocation());
       if (mounted) {
         setState(() {});
       }

@@ -125,7 +125,7 @@ bool NtripClient::sendGga()
         return false;
     }
 
-    LOGD(MODULE, "Sent GGA: %s", gga);
+    // LOGD(MODULE, "Sent GGA: %s", gga);
     return true;
 }
 

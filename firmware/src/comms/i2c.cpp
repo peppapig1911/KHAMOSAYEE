@@ -39,7 +39,6 @@ int I2C::write(uint8_t addr, const uint8_t *src, size_t len, bool nostop)
 
 int I2C::write_read(uint8_t addr, const uint8_t *wsrc, size_t wlen, uint8_t *rdst, size_t rlen)
 {
-    LOGD(MODULE, "write_read %u->%u bytes at 0x%02X", wlen, rlen, addr);
     xSemaphoreTake(_mutex, portMAX_DELAY);
     int wr = i2c_write_blocking(_instance, addr, wsrc, wlen, true);
     if (wr != (int)wlen)

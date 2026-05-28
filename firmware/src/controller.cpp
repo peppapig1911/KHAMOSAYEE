@@ -39,7 +39,7 @@ static double s_pending_waypoint_lat = 0.0;
 static double s_pending_waypoint_lon = 0.0;
 
 static ServoMotor sail(7, 0, 175, 0);
-static ServoMotor wheel(6, 90 - 40, 90 + 40);
+static ServoMotor wheel(6, 77, 117 + 40);
 
 static float wrap_180(float angle_deg)
 {
@@ -143,15 +143,27 @@ static void park_servos()
 
 static void apply_controls(float delta_deg, float theta_s_deg)
 {
-    // float wheel_center_deg = wheel_get_center_deg();
-    // float wheel_target_deg = clamp_float(wheel_center_deg + delta_deg, FRONT_WHEEL_MIN_DEG, FRONT_WHEEL_MAX_DEG);
-    // float sail_target_deg = clamp_float(theta_s_deg, 0.0f, THETA_S_MAX_DEG);
+    // Use the servo's configured min/max angles and drive servos via .rotate(position)
+    static constexpr float WHEEL_SERVO_MIN_DEG = 77.0f;
+    static constexpr float WHEEL_SERVO_MAX_DEG = 157.0f; // 117 + 40 from constructor
+    static constexpr float SAIL_SERVO_MIN_DEG = 0.0f;
+    static constexpr float SAIL_SERVO_MAX_DEG = 175.0f;
 
-    // s_telemetry.delta_deg = delta_deg;
-    // s_telemetry.theta_s_deg = sail_target_deg;
+    // Compute targets and clamp to servo physical range
+    const float wheel_center_deg = (WHEEL_SERVO_MIN_DEG + WHEEL_SERVO_MAX_DEG) * 0.5f;
+    const float wheel_target_deg = clamp_float(wheel_center_deg + delta_deg, WHEEL_SERVO_MIN_DEG, WHEEL_SERVO_MAX_DEG);
+    const float sail_target_deg = clamp_float(theta_s_deg, SAIL_SERVO_MIN_DEG, SAIL_SERVO_MAX_DEG);
 
-    // wheel_rotate_deg(wheel_target_deg);
-    // sail_set_manual_angle(sail_target_deg);
+    // Update telemetry
+    s_telemetry.delta_deg = delta_deg;
+    s_telemetry.theta_s_deg = sail_target_deg;
+
+    // Convert to normalized 0..1 positions and apply using .rotate()
+    const float wheel_pos = clamp_float((wheel_target_deg - WHEEL_SERVO_MIN_DEG) / (WHEEL_SERVO_MAX_DEG - WHEEL_SERVO_MIN_DEG), 0.0f, 1.0f);
+    const float sail_pos = clamp_float((sail_target_deg - SAIL_SERVO_MIN_DEG) / (SAIL_SERVO_MAX_DEG - SAIL_SERVO_MIN_DEG), 0.0f, 1.0f);
+
+    wheel.rotate(wheel_pos);
+    sail.rotate(sail_pos);
 }
 
 static void controller_task(void *param)
